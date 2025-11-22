@@ -1,0 +1,4 @@
+pyPDF2
+datasets
+reportlab
+git+https://github.com/huridocs/pdf-features.git@2025.10.16.3
