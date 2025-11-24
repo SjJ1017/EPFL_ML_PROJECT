@@ -4,12 +4,13 @@ import sys
 import json
 import math
 from collections import defaultdict
-features_path = os.path.join(os.getcwd(), "features")
-src_path = os.path.join(os.getcwd(), "src")
-sys.path.append("features")
-if features_path not in sys.path:
-    sys.path.append(features_path)
-    sys.path.append(src_path)
+
+# features_path = os.path.join(os.getcwd(), "features")
+# src_path = os.path.join(os.getcwd(), "src")
+# sys.path.append("features")
+# if features_path not in sys.path:
+#     sys.path.append(features_path)
+#     sys.path.append(src_path)
 
 from pdf_features.PdfFeatures import PdfFeatures
 from pdf_features.configuration import LABELS_FILE_NAME, TOKEN_TYPE_RELATIVE_PATH, XML_NAME
@@ -104,10 +105,11 @@ class DocLayNetDataset:
     ROOT_RELATIVE_FEATURE = ''
     DATASET_NAME = "docling-project/DocLayNet-v1.2"
 
-    def __init__(self, split="train"):
+    def __init__(self, split="train", rewrite_storage=False):
         self.dataset = load_dataset(self.DATASET_NAME, split=split)
         self.split = split
         self.converted = defaultdict(bool)
+        self.rewrite_storage = rewrite_storage
 
     def __len__(self):
         return len(self.dataset)
@@ -133,6 +135,11 @@ class DocLayNetDataset:
         name = self.get_pdf_name(idx)
         temp_dir = os.path.join(self.ROOT, self.PDF_DIR, name)
         # print('pdf saved to temp dir:', temp_dir)
+        # existing files?
+        if os.path.exists(temp_dir) and not self.rewrite_storage:
+            pdf_feature = ModifiedPdfFeatures.from_pdf_path(os.path.join(temp_dir, "document.pdf"), os.path.join(temp_dir, XML_NAME))
+            self.converted[idx] = pdf_feature
+            return pdf_feature
         os.makedirs(temp_dir, exist_ok=True)
         pdf_path = os.path.join(temp_dir, f"document.pdf")
         xml_path = os.path.join(temp_dir, XML_NAME)
@@ -282,6 +289,9 @@ class DocLayNetDataset:
 
         features = ModifiedPdfFeatures.from_labeled_data(pdf_labeled_data_root_path = os.path.join(self.ROOT_RELATIVE_FEATURE, self.ROOT), dataset=self.split + '_data', pdf_name=self.get_pdf_name(idx))
         return features
+    
+    def __len__(self):
+        return len(self.dataset)
 
 
     def visualize_tokens(self, idx, output_path: str, labels: bool = False):
@@ -323,22 +333,21 @@ class DocLayNetDataset:
             writer.write(f_out)
 
 
+if __name__ == "__main__":
+    # It will take 1 hour to download the whole dataset, if you have not done it yet.
+    test_dataset = DocLayNetDataset(split="test")
 
 
-# It will take 1 hour to download the whole dataset, if you have not done it yet.
-test_dataset = DocLayNetDataset(split="test")
+    example_idx = 0
+    # To see the original labels in the dataset
+    test_dataset.visualize_item(example_idx, output_path="viz_labels.pdf")
 
+    # To see the tokens (automatically extracted) with labels, the token types are all set to "text" since no labels are provided yet.
+    test_dataset.visualize_tokens(example_idx, output_path="token_viz_unlabeled.pdf", labels=False)
 
-example_idx = 0
-# To see the original labels in the dataset
-test_dataset.visualize_item(example_idx, output_path="viz_labels.pdf")
+    # Combine the labels from the dataset and the tokens extracted, the feature tokens will have the correct labels.
+    features = test_dataset[example_idx]
+    print(features)
 
-# To see the tokens (automatically extracted) with labels, the token types are all set to "text" since no labels are provided yet.
-test_dataset.visualize_tokens(example_idx, output_path="token_viz_unlabeled.pdf", labels=False)
-
-# Combine the labels from the dataset and the tokens extracted, the feature tokens will have the correct labels.
-features = test_dataset[example_idx]
-print(features)
-
-# To see the tokens with correct labels (i.e. viz_labels.pdf + token_viz_unlabeled.pdf = token_viz_labeled.pdf)
-test_dataset.visualize_tokens(example_idx, output_path="token_viz_labeled.pdf", labels=True)
+    # To see the tokens with correct labels (i.e. viz_labels.pdf + token_viz_unlabeled.pdf = token_viz_labeled.pdf)
+    test_dataset.visualize_tokens(example_idx, output_path="token_viz_labeled.pdf", labels=True)

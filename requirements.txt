@@ -1,4 +1,8 @@
 pyPDF2
 datasets
 reportlab
+torch
+transformers
+tqdm
+matplotlib
 git+https://github.com/huridocs/pdf-features.git@2025.10.16.3
