@@ -42,7 +42,6 @@ class FeatureExtractor:
                     token_ids += [tokenizer.pad_token_id] * padding_length
                 else:
                     token_ids = token_ids[:self.max_length]
-                token_ids = []
                 # font info
                 font_id = float(token.font.font_id)
                 font_size = float(token.font.font_size)

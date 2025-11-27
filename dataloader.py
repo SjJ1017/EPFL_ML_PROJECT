@@ -20,6 +20,8 @@ from os.path import join, exists
 from pathlib import Path
 
 
+TINY_DATA = os.getenv("TINY_DATA", "false").lower() == "true"
+
 class ModifiedPdfFeatures(PdfFeatures):
 
     @staticmethod
@@ -103,7 +105,7 @@ class DocLayNetDataset:
     ROOT = "pdf-labeled-data"
     PDF_DIR = 'pdfs'
     ROOT_RELATIVE_FEATURE = ''
-    DATASET_NAME = "docling-project/DocLayNet-v1.2"
+    DATASET_NAME = "docling-project/DocLayNet-v1.2" if not TINY_DATA else "SHENJJ1017/TinyDocLayNet"
 
     def __init__(self, split="train", rewrite_storage=False):
         self.dataset = load_dataset(self.DATASET_NAME, split=split)
