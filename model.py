@@ -23,8 +23,8 @@ class FeatureExtractor:
 
     def get_page_features(self):
         # stop at k
-        k = float('inf')
-        # k = 5
+        # k = float('inf')
+        k = 500
         start = 0
         pages_features = []
         page_targets = []
@@ -165,12 +165,14 @@ if __name__ == "__main__":
     N = 20
     num_classes = 11
 
+    device = torch.device("cuda" if torch.cuda.is_available() else "mps")
+    print("Using device:", device)
     dataset = DocLayNetDataset(split="test", rewrite_storage=False)
     feature_extractor = FeatureExtractor(dataset)
     pages_features, pages_targets = feature_extractor.get_page_features()
-    model = Seq2SeqTransformer(input_dim=N, output_dim=num_classes)
+    model = Seq2SeqTransformer(input_dim=N, output_dim=num_classes).to(device)
     optimizer = optim.Adam(model.parameters(), lr=1e-4)
-    criterion = nn.CrossEntropyLoss()
+    criterion = nn.CrossEntropyLoss().to(device)
 
     features_and_targets = list(zip(pages_features, pages_targets))
     import random
@@ -180,7 +182,7 @@ if __name__ == "__main__":
     validation_data = features_and_targets[int(0.8 * total):]
     print(f"Training samples: {len(training_data)}, Validation samples: {len(validation_data)}")
 
-    BATCH_SIZE = 8 
+    BATCH_SIZE = 64
     EPOCHS = 1
     losses = []
     accuracies = []
@@ -188,10 +190,13 @@ if __name__ == "__main__":
     criterion = nn.CrossEntropyLoss(ignore_index=-1)
     
     for epoch in range(EPOCHS):
-        for i in range(0, len(training_data), BATCH_SIZE):
+        j = 0
+        for i in tqdm(range(0, len(training_data), BATCH_SIZE)):
+            j += 1
             batch_data = training_data[i:i+BATCH_SIZE]
             
             x, y, lengths = collate_batch(batch_data, N)
+            x, y = x.to(device), y.to(device)
             
             optimizer.zero_grad()
             pred = model(x)  # (batch_size, M, num_classes)
@@ -205,23 +210,6 @@ if __name__ == "__main__":
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
 
-            # accuracy
-            if (i // BATCH_SIZE + 1) % 100 == 0:
-                total_correct = 0
-                total_samples = 0
-                for page_features_val, targets_val in validation_data:
-                    x_val = torch.tensor(page_features_val, dtype=torch.float32).reshape(N, -1)
-                    y_val = torch.tensor(targets_val, dtype=torch.long)
-                    with torch.no_grad():
-                        pred_val = model(x_val)
-                        _, predicted_val = torch.max(pred_val, dim=1)
-                        correct_val = (predicted_val == y_val).sum().item()
-                        total_correct += correct_val
-                        total_samples += y_val.size(0)
-                accuracy = total_correct / total_samples
-
-                print(f"Batch {i // BATCH_SIZE + 1} | Validation Accuracy = {accuracy:.4f}")
-        print(f"Epoch {epoch} | Loss = {loss.item():.4f}, Accuracy = {accuracy:.4f}")
 
     import matplotlib.pyplot as plt
 

@@ -315,7 +315,9 @@ class DocLayNetDataset:
         packet = io.BytesIO()
         width, height = self.get_item_size(idx)
         can = canvas.Canvas(packet, pagesize=(width, height))
+        id = 0
         for token in tokens:
+            id += 1
             bounding_box = token.bounding_box
             l, t, r, b = bounding_box.left, bounding_box.top, bounding_box.right, bounding_box.bottom
             x, y, w, h = l, height - t, r - l, t - b
@@ -323,7 +325,7 @@ class DocLayNetDataset:
 
 
             can.rect(x, y, w, h, stroke=1, fill=0)
-            can.drawString(x, y + h + 5, str(token_type))
+            can.drawString(x, y + h + 5, str(token_type) + f"token_{id}")
         can.save()
         packet.seek(0)
 
