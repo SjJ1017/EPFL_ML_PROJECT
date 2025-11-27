@@ -24,6 +24,7 @@ class FeatureExtractor:
     def get_page_features(self):
         # stop at k
         k = float('inf')
+        # k = 5
         start = 0
         pages_features = []
         page_targets = []
@@ -41,7 +42,7 @@ class FeatureExtractor:
                     token_ids += [tokenizer.pad_token_id] * padding_length
                 else:
                     token_ids = token_ids[:self.max_length]
-                
+                token_ids = []
                 # font info
                 font_id = float(token.font.font_id)
                 font_size = float(token.font.font_size)
@@ -89,29 +90,76 @@ class Seq2SeqTransformer(nn.Module):
         self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
         
         # Transformer Decoder
-        decoder_layer = nn.TransformerDecoderLayer(d_model=hidden_dim, nhead=num_heads)
-        self.decoder = nn.TransformerDecoder(decoder_layer, num_layers=num_layers)
+        # decoder_layer = nn.TransformerDecoderLayer(d_model=hidden_dim, nhead=num_heads)
+        # self.decoder = nn.TransformerDecoder(decoder_layer, num_layers=num_layers)
         
         self.output_proj = nn.Linear(hidden_dim, output_dim)
     
     def forward(self, x, target=None):
         """
-        x: (N, M) -> reshape to (M, N) for sequence first
+        x: (batch_size, N, M) 或 (N, M) for single sample
         target: not used in forward pass, only for training
         """
+        if x.dim() == 2:
+            x = x.unsqueeze(0)  # (1, N, M)
+            squeeze_output = True
+        else:
+            squeeze_output = False
         
-        M = x.shape[1] # (M, batch, hidden_dim)
-        x = x.T  # (M, N)
-        x_emb = self.input_proj(x) + self.pos_embedding[:M]  # (M, hidden_dim)
-        x_emb = x_emb.unsqueeze(1)  # (M, 1, hidden_dim)
+        batch_size, N, M = x.shape
         
-        memory = self.encoder(x_emb)  # (M, 1, hidden_dim)
+        # (batch_size, N, M) -> (batch_size, M, N) -> (M, batch_size, N)
+        x = x.transpose(1, 2).transpose(0, 1)  # (M, batch_size, N)
+        x_emb = self.input_proj(x) + self.pos_embedding[:M].unsqueeze(1)  # (M, batch_size, hidden_dim)
         
-        out = memory.squeeze(1)  # (M, hidden_dim)
+        memory = self.encoder(x_emb)  # (M, batch_size, hidden_dim)
         
-        out = self.output_proj(out)  # (M, output_dim)
+        # (M, batch_size, hidden_dim) -> (batch_size, M, hidden_dim)
+        out = memory.transpose(0, 1)
+        
+        out = self.output_proj(out)  # (batch_size, M, output_dim)
+        
+        if squeeze_output:
+            out = out.squeeze(0)  # (M, output_dim)
+        
         return out
 
+
+
+def collate_batch(batch_data, N):
+    batch_x = []
+    batch_y = []
+    lengths = []
+    
+    for page_features, targets in batch_data:
+        x = torch.tensor(page_features, dtype=torch.float32).reshape(N, -1)
+        y = torch.tensor(targets, dtype=torch.long)
+        batch_x.append(x)
+        batch_y.append(y)
+        lengths.append(len(targets))
+    
+    # Padding to same length
+    max_len = max(lengths)
+    padded_x = []
+    padded_y = []
+    
+    for x, y, length in zip(batch_x, batch_y, lengths):
+        if x.shape[1] < max_len:
+            # Pad x
+            pad_size = max_len - x.shape[1]
+            x_padded = torch.cat([x, torch.zeros(N, pad_size)], dim=1)
+            # Pad y with -1 (ignore index)
+            y_padded = torch.cat([y, torch.full((pad_size,), -1, dtype=torch.long)])
+        else:
+            x_padded = x
+            y_padded = y
+        padded_x.append(x_padded)
+        padded_y.append(y_padded)
+    
+    batch_x = torch.stack(padded_x)  # (batch_size, N, max_len)
+    batch_y = torch.stack(padded_y)  # (batch_size, max_len)
+    
+    return batch_x, batch_y, lengths
 
 
 if __name__ == "__main__":
@@ -133,25 +181,35 @@ if __name__ == "__main__":
     validation_data = features_and_targets[int(0.8 * total):]
     print(f"Training samples: {len(training_data)}, Validation samples: {len(validation_data)}")
 
+    BATCH_SIZE = 8 
     EPOCHS = 1
     losses = []
     accuracies = []
+    
+    criterion = nn.CrossEntropyLoss(ignore_index=-1)
+    
     for epoch in range(EPOCHS):
-        for i, (page_features, targets) in enumerate(training_data):
-            x, y = page_features, targets
-            x = torch.tensor(x, dtype=torch.float32).reshape(N, -1)
-            y = torch.tensor(y, dtype=torch.long)
-
+        for i in range(0, len(training_data), BATCH_SIZE):
+            batch_data = training_data[i:i+BATCH_SIZE]
+            
+            x, y, lengths = collate_batch(batch_data, N)
+            
             optimizer.zero_grad()
-            pred = model(x) 
-            loss = criterion(pred, y)
+            pred = model(x)  # (batch_size, M, num_classes)
+            
+            pred_flat = pred.view(-1, num_classes)  # (batch_size * M, num_classes)
+            y_flat = y.view(-1)  # (batch_size * M)
+            
+            loss = criterion(pred_flat, y_flat)
             losses.append(loss.item())
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
 
             # accuracy
-            if (i + 1) % 500 == 0:
+            if (i // BATCH_SIZE + 1) % 100 == 0:
+                total_correct = 0
+                total_samples = 0
                 for page_features_val, targets_val in validation_data:
                     x_val = torch.tensor(page_features_val, dtype=torch.float32).reshape(N, -1)
                     y_val = torch.tensor(targets_val, dtype=torch.long)
@@ -159,9 +217,11 @@ if __name__ == "__main__":
                         pred_val = model(x_val)
                         _, predicted_val = torch.max(pred_val, dim=1)
                         correct_val = (predicted_val == y_val).sum().item()
-                        accuracy = correct_val / y_val.size(0)
+                        total_correct += correct_val
+                        total_samples += y_val.size(0)
+                accuracy = total_correct / total_samples
 
-                print(f"Iteration {i+1} | Validation Accuracy = {accuracy:.4f}")
+                print(f"Batch {i // BATCH_SIZE + 1} | Validation Accuracy = {accuracy:.4f}")
         print(f"Epoch {epoch} | Loss = {loss.item():.4f}, Accuracy = {accuracy:.4f}")
 
     import matplotlib.pyplot as plt

@@ -1,5 +1,6 @@
 pdf-labeled-data/
 __pycache__/
+test_pdfs/
 
 # macOS system files
 .DS_Store
