@@ -165,7 +165,7 @@ if __name__ == "__main__":
     N = 20
     num_classes = 11
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "mps")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("Using device:", device)
     dataset = DocLayNetDataset(split="test", rewrite_storage=False)
     feature_extractor = FeatureExtractor(dataset)
