@@ -112,6 +112,7 @@ class DocLayNetDataset:
         self.split = split
         self.converted = defaultdict(bool)
         self.rewrite_storage = rewrite_storage
+        self.cache = {}
 
     def __len__(self):
         return len(self.dataset)
@@ -286,12 +287,28 @@ class DocLayNetDataset:
             writer.write(f_out)
     
     def __getitem__(self, idx):
+        pdf_name = self.get_pdf_name(idx)
+        if self.cache.get(pdf_name, None):
+            return self.cache[pdf_name]
         if not self.converted[idx]:
             self.get_item_features(idx)
 
         features = ModifiedPdfFeatures.from_labeled_data(pdf_labeled_data_root_path = os.path.join(self.ROOT_RELATIVE_FEATURE, self.ROOT), dataset=self.split + '_data', pdf_name=self.get_pdf_name(idx))
+        self.cache[pdf_name] = features
         return features
-    
+
+    def save_cache(self, output_path=None):
+        import pickle
+        cache_path = output_path if output_path else "dataloader_cache.pkl"
+        with open(cache_path, "wb") as f:
+            pickle.dump(self.cache, f)
+
+    def load_cache(self, input_path=None):
+        import pickle
+        cache_path = input_path if input_path else "dataloader_cache.pkl"
+        with open(cache_path, "rb") as f:
+            self.cache = pickle.load(f)
+            
     def __len__(self):
         return len(self.dataset)
 

@@ -168,8 +168,19 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("Using device:", device)
     dataset = DocLayNetDataset(split="test", rewrite_storage=False)
+    dataset.load_cache(input_path="data_cache.pkl")
+    print("Dataset cache loaded.")
+    # getting data... (test speed up)
+    for i in tqdm(range(len(dataset))):
+        _ = dataset[i]
+    dataset.save_cache(output_path="data_cache.pkl")
+    print("Dataset loaded.")
+    # Done
+
     feature_extractor = FeatureExtractor(dataset)
     pages_features, pages_targets = feature_extractor.get_page_features()
+
+
     model = Seq2SeqTransformer(input_dim=N, output_dim=num_classes).to(device)
     optimizer = optim.Adam(model.parameters(), lr=1e-4)
     criterion = nn.CrossEntropyLoss().to(device)
@@ -181,6 +192,7 @@ if __name__ == "__main__":
     training_data = features_and_targets[:int(0.8 * total)]
     validation_data = features_and_targets[int(0.8 * total):]
     print(f"Training samples: {len(training_data)}, Validation samples: {len(validation_data)}")
+
 
     BATCH_SIZE = 64
     EPOCHS = 1
