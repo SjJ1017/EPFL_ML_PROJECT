@@ -316,6 +316,20 @@ class DocLayNetDataset:
             self.get_item_features(idx)
 
         features = ModifiedPdfFeatures.from_labeled_data(pdf_labeled_data_root_path = os.path.join(self.ROOT_RELATIVE_FEATURE, self.ROOT), dataset=self.split + '_data', pdf_name=self.get_pdf_name(idx))
+        
+        adjusted_bboxes = self.get_adjusted_bbox(idx)
+        for token in features.pages[0].tokens:
+            token.prediction = 0  # reset all tokens to text
+
+        bbox_tokens = {
+            str(bbox): [token for token in features.pages[0].tokens if token.bounding_box.get_intersection_percentage(Rectangle.from_width_height(left=bbox[0], top=bbox[1], width=bbox[2], height=bbox[3])) > 0] for bbox in adjusted_bboxes
+        }
+        for bbox in adjusted_bboxes:
+            token_list = bbox_tokens[str(bbox)]
+            last_token = token_list[-1] if token_list else None
+            if last_token:
+                last_token.prediction = 1  # last token defined as the end of segment
+
         self.cache[pdf_name] = features
         return features
 
@@ -375,32 +389,8 @@ class DocLayNetDataset:
         with open(output_path, "wb") as f_out:
             writer.write(f_out)
 
-class DocLayNetDatasetSegmented(DocLayNetDataset):
 
-    def __getitem__(self, idx):
-        pdf_name = self.get_pdf_name(idx)
-        if self.cache.get(pdf_name, None):
-            return self.cache[pdf_name]
-        if not self.converted[idx]:
-            self.get_item_features(idx)
-
-        features = ModifiedPdfFeatures.from_labeled_data(pdf_labeled_data_root_path = os.path.join(self.ROOT_RELATIVE_FEATURE, self.ROOT), dataset=self.split + '_data', pdf_name=self.get_pdf_name(idx))
-        adjusted_bboxes = self.get_adjusted_bbox(idx)
-        for token in features.pages[0].tokens:
-            token.token_type = TokenType.from_index(0)
-
-        bbox_tokens = {
-            str(bbox): [token for token in features.pages[0].tokens if token.bounding_box.get_intersection_percentage(Rectangle.from_width_height(left=bbox[0], top=bbox[1], width=bbox[2], height=bbox[3])) > 0] for bbox in adjusted_bboxes
-        }
-        for bbox in adjusted_bboxes:
-            token_list = bbox_tokens[str(bbox)]
-            last_token = token_list[-1] if token_list else None
-            if last_token:
-                last_token.token_type = TokenType.from_index(1) # last token defined as the end of segment
-        self.cache[pdf_name] = features
-        return features
-
-    def visualize_tokens(self, idx, output_path: str, labels: bool = False):
+    def visualize_segments(self, idx, output_path: str, labels: bool = False):
         from reportlab.pdfgen import canvas
         from PyPDF2 import PdfReader, PdfWriter
         import io
@@ -422,8 +412,8 @@ class DocLayNetDatasetSegmented(DocLayNetDataset):
         id = 0
         waitinglist = []
         for token in tokens:
-            token_type = token.token_type.get_index()
-            if token_type == 1:
+            prediction = token.prediction
+            if prediction == 1:
                 id += 1
                 aggregated_rectangle = Rectangle.merge_rectangles(waitinglist + [token.bounding_box])
                 x, y, w, h = aggregated_rectangle.left, aggregated_rectangle.top, aggregated_rectangle.width, aggregated_rectangle.height
@@ -443,9 +433,35 @@ class DocLayNetDatasetSegmented(DocLayNetDataset):
         with open(output_path, "wb") as f_out:
             writer.write(f_out)
 
+class DocLayNetDatasetSegmented(DocLayNetDataset):
+
+    def __getitem__(self, idx):
+        pdf_name = self.get_pdf_name(idx)
+        if self.cache.get(pdf_name, None):
+            return self.cache[pdf_name]
+        if not self.converted[idx]:
+            self.get_item_features(idx)
+
+        features = ModifiedPdfFeatures.from_labeled_data(pdf_labeled_data_root_path = os.path.join(self.ROOT_RELATIVE_FEATURE, self.ROOT), dataset=self.split + '_data', pdf_name=self.get_pdf_name(idx))
+        adjusted_bboxes = self.get_adjusted_bbox(idx)
+        for token in features.pages[0].tokens:
+            token.prediction = 0  # reset all tokens to text
+
+        bbox_tokens = {
+            str(bbox): [token for token in features.pages[0].tokens if token.bounding_box.get_intersection_percentage(Rectangle.from_width_height(left=bbox[0], top=bbox[1], width=bbox[2], height=bbox[3])) > 0] for bbox in adjusted_bboxes
+        }
+        for bbox in adjusted_bboxes:
+            token_list = bbox_tokens[str(bbox)]
+            last_token = token_list[-1] if token_list else None
+            if last_token:
+                last_token.prediction = 1  # last token defined as the end of segment
+        self.cache[pdf_name] = features
+        return features
+
+
 if __name__ == "__main__":
     # It will take 1 hour to download the whole dataset, if you have not done it yet.
-    test_dataset = DocLayNetDatasetSegmented(split="test")
+    test_dataset = DocLayNetDataset(split="test")
 
 
     example_idx = 34
@@ -462,4 +478,4 @@ if __name__ == "__main__":
     #print(features)
 
     # To see the tokens with correct labels (i.e. viz_labels.pdf + token_viz_unlabeled.pdf = token_viz_labeled.pdf)
-    test_dataset.visualize_tokens(example_idx, output_path="token_viz_labeled.pdf", labels=False)
+    test_dataset.visualize_tokens(example_idx, output_path="token_viz_labeled.pdf", labels=True)
