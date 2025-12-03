@@ -4,7 +4,8 @@ import sys
 import json
 import math
 from collections import defaultdict
-
+from pdf_features.Rectangle import Rectangle
+from pdf_token_type_labels.TokenType import TokenType
 # features_path = os.path.join(os.getcwd(), "features")
 # src_path = os.path.join(os.getcwd(), "src")
 # sys.path.append("features")
@@ -164,7 +165,7 @@ class DocLayNetDataset:
         metadata = item["metadata"]
         original_height, original_width = metadata["original_height"], metadata["original_width"]
         return original_width, original_height
-    
+
     def get_adjusted_bbox(self, idx):
         item = self.dataset[idx]
         bboxes = item["bboxes"]
@@ -245,7 +246,28 @@ class DocLayNetDataset:
             labels.append(label)
         return {"pages": [{"number": 1, "labels": labels} ]}
     
-
+    def get_segment_labels(self, idx):
+        adjusted_bboxes = self.get_adjusted_bbox(idx)
+        category_ids = self.dataset[idx]["category_id"]
+        assert len(adjusted_bboxes) == len(category_ids)
+        segment_labels = []
+        features = self.get_item_features(idx)
+        bbox_tokens = {
+            str(bbox): [token for token in features.pages[0].tokens if token.bounding_box.get_intersection_percentage(Rectangle.from_width_height(left=bbox[0], top=bbox[1], width=bbox[2], height=bbox[3])) > 0] for bbox in adjusted_bboxes
+        }
+        for bbox in adjusted_bboxes:
+            label = {
+                "bounding_box": {
+                    "top": math.ceil(bbox[1]),
+                    "left": math.ceil(bbox[0]),
+                    "width": math.ceil(bbox[2]),
+                    "height": math.ceil(bbox[3]),
+                },
+                "label_type": 0
+            }
+            segment_labels.append(label)
+        return {"pages": [{"number": 1, "labels": segment_labels} ]}
+    
     def visualize_item(self, idx, output_path=None):
         from reportlab.pdfgen import canvas
         from PyPDF2 import PdfReader, PdfWriter
@@ -353,22 +375,91 @@ class DocLayNetDataset:
         with open(output_path, "wb") as f_out:
             writer.write(f_out)
 
+class DocLayNetDatasetSegmented(DocLayNetDataset):
+
+    def __getitem__(self, idx):
+        pdf_name = self.get_pdf_name(idx)
+        if self.cache.get(pdf_name, None):
+            return self.cache[pdf_name]
+        if not self.converted[idx]:
+            self.get_item_features(idx)
+
+        features = ModifiedPdfFeatures.from_labeled_data(pdf_labeled_data_root_path = os.path.join(self.ROOT_RELATIVE_FEATURE, self.ROOT), dataset=self.split + '_data', pdf_name=self.get_pdf_name(idx))
+        adjusted_bboxes = self.get_adjusted_bbox(idx)
+        for token in features.pages[0].tokens:
+            token.token_type = TokenType.from_index(0)
+
+        bbox_tokens = {
+            str(bbox): [token for token in features.pages[0].tokens if token.bounding_box.get_intersection_percentage(Rectangle.from_width_height(left=bbox[0], top=bbox[1], width=bbox[2], height=bbox[3])) > 0] for bbox in adjusted_bboxes
+        }
+        for bbox in adjusted_bboxes:
+            token_list = bbox_tokens[str(bbox)]
+            last_token = token_list[-1] if token_list else None
+            if last_token:
+                last_token.token_type = TokenType.from_index(1) # last token defined as the end of segment
+        self.cache[pdf_name] = features
+        return features
+
+    def visualize_tokens(self, idx, output_path: str, labels: bool = False):
+        from reportlab.pdfgen import canvas
+        from PyPDF2 import PdfReader, PdfWriter
+        import io
+        if labels:
+            pdf_features = self[idx]
+        else:
+            pdf_features = self.__getitem__(idx)
+        pdf_path = os.path.join(self.ROOT, self.PDF_DIR, self.get_pdf_name(idx), "document.pdf")
+        pages = pdf_features.pages
+        first_page = pages[0]
+        tokens = first_page.tokens
+
+        reader = PdfReader(pdf_path)
+        writer = PdfWriter()
+        page = reader.pages[0]
+        packet = io.BytesIO()
+        width, height = self.get_item_size(idx)
+        can = canvas.Canvas(packet, pagesize=(width, height))
+        id = 0
+        waitinglist = []
+        for token in tokens:
+            token_type = token.token_type.get_index()
+            if token_type == 1:
+                id += 1
+                aggregated_rectangle = Rectangle.merge_rectangles(waitinglist + [token.bounding_box])
+                x, y, w, h = aggregated_rectangle.left, aggregated_rectangle.top, aggregated_rectangle.width, aggregated_rectangle.height
+                y = height - y - h
+                can.rect(x, y, w, h, stroke=1, fill=0)
+                can.drawString(x, y + h + 5, f"segment_{id}")
+                waitinglist = []
+            else:
+                waitinglist.append(token.bounding_box)
+        can.save()
+        packet.seek(0)
+
+        overlay_pdf = PdfReader(packet)
+        page.merge_page(overlay_pdf.pages[0])
+        writer.add_page(page)
+
+        with open(output_path, "wb") as f_out:
+            writer.write(f_out)
 
 if __name__ == "__main__":
     # It will take 1 hour to download the whole dataset, if you have not done it yet.
-    test_dataset = DocLayNetDataset(split="test")
+    test_dataset = DocLayNetDatasetSegmented(split="test")
 
 
-    example_idx = 0
+    example_idx = 34
     # To see the original labels in the dataset
-    test_dataset.visualize_item(example_idx, output_path="viz_labels.pdf")
+    features = test_dataset[0]
+    print(features.pages[0].tokens[0])
+    #test_dataset.visualize_item(example_idx, output_path="viz_labels.pdf")
 
     # To see the tokens (automatically extracted) with labels, the token types are all set to "text" since no labels are provided yet.
-    test_dataset.visualize_tokens(example_idx, output_path="token_viz_unlabeled.pdf", labels=False)
+    #test_dataset.visualize_tokens(example_idx, output_path="token_viz_unlabeled.pdf", labels=False)
 
     # Combine the labels from the dataset and the tokens extracted, the feature tokens will have the correct labels.
-    features = test_dataset[example_idx]
-    print(features)
+    #features = test_dataset[example_idx]
+    #print(features)
 
     # To see the tokens with correct labels (i.e. viz_labels.pdf + token_viz_unlabeled.pdf = token_viz_labeled.pdf)
-    test_dataset.visualize_tokens(example_idx, output_path="token_viz_labeled.pdf", labels=True)
+    test_dataset.visualize_tokens(example_idx, output_path="token_viz_labeled.pdf", labels=False)
