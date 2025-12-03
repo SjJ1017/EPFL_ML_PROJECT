@@ -11,7 +11,7 @@ import torch.optim as optim
 from collections import Counter
 from time import time
 
-class ImprovedFeatureExtractor:
+class FeatureExtractor:
 
     def __init__(self, dataset: DocLayNetDataset):
         self.dataset = dataset
@@ -147,7 +147,7 @@ class ImprovedFeatureExtractor:
                 yield page
 
 
-class ImprovedTransformerTagger(nn.Module):
+class TransformerTagger(nn.Module):
 
     def __init__(self, input_dim, hidden_dim=256, num_layers=4, num_heads=8, 
                  output_dim=11, dropout=0.2, max_seq_len=2000):
@@ -395,7 +395,9 @@ if __name__ == "__main__":
             print("Loading data cache...")
             dataset.load_cache(input_path="data_cache.pkl")
         
-        feature_extractor = ImprovedFeatureExtractor(dataset)
+        feature_extractor = FeatureExtractor(dataset)
+        if not os.path.exists("data_cache.pkl"):
+            dataset.save_cache(output_path="data_cache.pkl")
         pages_features, pages_targets = feature_extractor.get_page_features()
         feature_dim = len(pages_features[0][0])
         
@@ -416,7 +418,7 @@ if __name__ == "__main__":
     print(f"\nTraining samples: {len(training_data)}, Validation samples: {len(validation_data)}")
     
     class_weights = compute_class_weights(pages_targets, num_classes, device)
-    model = ImprovedTransformerTagger(
+    model = TransformerTagger(
         input_dim=feature_dim,
         hidden_dim=256,
         num_layers=4,
