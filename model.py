@@ -115,12 +115,7 @@ class FeatureExtractor:
     def get_page_features(self):
         pages_features = []
         page_targets = []
-        page_id = 0
         for page in self.loop_token_features():
-            page_id += 1
-            print("Processing page:", page_id)
-            if page_id > 10:
-                return pages_features, page_targets
             tokens = page.tokens
             if len(tokens) == 0:
                 continue
