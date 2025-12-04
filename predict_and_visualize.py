@@ -9,6 +9,7 @@ import io
 import argparse
 from pdf_features.Rectangle import Rectangle
 import os
+from collections import defaultdict
 
 CATEGORIES = {
     0: "Formula",
@@ -75,7 +76,8 @@ def visualize_segments(pdf_features, pdf_path, output_path: str):
     from reportlab.pdfgen import canvas
     from PyPDF2 import PdfReader, PdfWriter
     import io
-    
+    from collections import defaultdict
+
     pages = pdf_features.pages
     first_page = pages[0]
     tokens = first_page.tokens
@@ -84,28 +86,52 @@ def visualize_segments(pdf_features, pdf_path, output_path: str):
     writer = PdfWriter()
     page = reader.pages[0]
     packet = io.BytesIO()
-    width, height = page.mediabox.width, page.mediabox.height
+    
+    width = float(page.mediabox.width)
+    height = float(page.mediabox.height)
+    
     can = canvas.Canvas(packet, pagesize=(width, height))
-    id = 0
     waitinglist = []
+    label_waitinglist = []
+    ids = defaultdict(int)
+    
     for token in tokens:
         prediction = token.prediction
+        label_waitinglist.append(token.token_type)
         if prediction == 1:
-            id += 1
             aggregated_rectangle = Rectangle.merge_rectangles(waitinglist + [token.bounding_box])
-            x, y, w, h = aggregated_rectangle.left, aggregated_rectangle.top, aggregated_rectangle.width, aggregated_rectangle.height
-            y = height - y - h
-            can.rect(x, y, w, h, stroke=1, fill=0)
-            # can.drawString(x, y + h + 5, f"segment_{id}")
+            
+            x = float(aggregated_rectangle.left)
+            y = float(aggregated_rectangle.top)
+            w = float(aggregated_rectangle.width)
+            h = float(aggregated_rectangle.height)
+            
+            y_reportlab = height - y - h 
+            
+            can.rect(x, y_reportlab, w, h, stroke=1, fill=0)
+            aggregated_label = max(set(label_waitinglist), key=label_waitinglist.count)
+            ids[aggregated_label] += 1
+            id = ids[aggregated_label]
+            can.drawString(x, y_reportlab + h + 5, f"{aggregated_label}" + f" {id}")
             waitinglist = []
+            label_waitinglist = []
         else:
             waitinglist.append(token.bounding_box)
+            
     if waitinglist:
+        if 'id' not in locals():
+            id = 0
+            
         id += 1
         aggregated_rectangle = Rectangle.merge_rectangles(waitinglist)
-        x, y, w, h = aggregated_rectangle.left, aggregated_rectangle.top, aggregated_rectangle.width, aggregated_rectangle.height
-        y = height - y - h
-        can.rect(x, y, w, h, stroke=1, fill=0)
+        
+        x = float(aggregated_rectangle.left)
+        y = float(aggregated_rectangle.top)
+        w = float(aggregated_rectangle.width)
+        h = float(aggregated_rectangle.height)
+        
+        y_reportlab = height - y - h
+        can.rect(x, y_reportlab, w, h, stroke=1, fill=0)
     
     can.save()
     packet.seek(0)
