@@ -165,3 +165,5 @@ if __name__ == "__main__":
     for i in range(10):
         pdf_path = os.path.join(test_dataset.ROOT, test_dataset.PDF_DIR, test_dataset.get_pdf_name(i), "document.pdf")
         visualize_segments(segmented_pdf_features[i], pdf_path, f"test_pdf_labeled/test_output_{i}.pdf")
+
+    

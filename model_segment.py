@@ -110,6 +110,37 @@ class FeatureExtractorSegment(FeatureExtractor):
         
         return features
     
+    def get_page_features(self):
+        pages_features = []
+        page_targets = []
+        page_id = 0
+        for page in self.loop_token_features():
+            page_id += 1
+            print("Processing page:", page_id)
+            if page_id > 10:
+                return pages_features, page_targets
+            tokens = page.tokens
+            if len(tokens) == 0:
+                continue
+                
+            targets = []
+            feature_rows = []
+            
+            for i, token in enumerate(tokens):
+                prev_token = tokens[i-1] if i > 0 else None
+                next_token = tokens[i+1] if i < len(tokens) - 1 else None
+                
+                features = self.extract_statistical_features(
+                    token, page, prev_token, next_token
+                )
+                
+                feature_rows.append(features)
+                targets.append(token.prediction)
+            
+            pages_features.append(feature_rows)
+            page_targets.append(targets)
+        
+        return pages_features, page_targets
 class TransformerTaggerSegment(TransformerTagger, FeatureExtractorSegment):
     def __init__(self, *args, **kwargs):
         TransformerTagger.__init__(self, *args, **kwargs)
@@ -204,8 +235,8 @@ if __name__ == "__main__":
     features_and_targets = list(zip(pages_features, pages_targets))
     random.shuffle(features_and_targets)
     total = len(features_and_targets)
-    training_data = features_and_targets[:int(0.8 * total)]
-    validation_data = features_and_targets[int(0.8 * total):]
+    training_data = features_and_targets[:int(args.train_split * total)]
+    validation_data = features_and_targets[int(args.train_split * total):]
     print(f"\nTraining samples: {len(training_data)}, Validation samples: {len(validation_data)}")
     
     class_weights = compute_class_weights(pages_targets, num_classes, device)
