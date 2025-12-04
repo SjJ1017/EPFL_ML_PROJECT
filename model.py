@@ -412,15 +412,40 @@ def evaluate_model(model, validation_data, feature_dim, device, num_classes):
 if __name__ == "__main__":
     import pickle
     import os
-    
-    torch.manual_seed(42)
-    np.random.seed(42)
+    import argparse
+
+    parser = argparse.ArgumentParser("DocLayNet Training")
+    parser.add_argument("--data_path", type=str, help="Path to the DocLayNet dataset")
+    parser.add_argument("--device", type=str, default="auto",
+                        choices=["auto", "cpu", "cuda", "mps"], help="Device to use for training")
+    parser.add_argument("--batch_size", type=int, default=16, help="Batch size for training")
+    parser.add_argument('--split', type=str, default="test", help="Dataset split to use (train/val/test)")
+    parser.add_argument("--epochs", type=int, default=10, help="Number of training epochs")
+    parser.add_argument("--features_cache", type=str, default=".cache/features_cache.pkl", help="Path to cache extracted features")
+    parser.add_argument("--data_cache", type=str, default=".cache/data_cache.pkl", help="Path to cache dataset")
+    parser.add_argument("--train_split", type=float, default=0.8, help="Proportion of data to use for training")
+    parser.add_argument("--random_seed", type=int, default=42, help="Random seed for reproducibility")
+    parser.add_argument("--hidden_dim", type=int, default=512, help="Hidden dimension size of the Transformer")
+    parser.add_argument("--num_layers", type=int, default=8, help="Number of Transformer layers")
+    parser.add_argument("--num_heads", type=int, default=8, help="Number of attention heads in the Transformer")
+    parser.add_argument("--learning_rate", type=float, default=2e-4, help="Learning rate for optimizer")
+    parser.add_argument("--dropout", type=float, default=0.2, help="Dropout rate")
+    parser.add_argument("--gamma", type=float, default=2.0, help="Focusing parameter for Focal Loss")
+    parser.add_argument("--weight_decay", type=float, default=0.01, help="Weight decay for optimizer")
+    parser.add_argument("--model_save_path", type=str, default="best_model.pth", help="Path to save the best model")
+    args = parser.parse_args()
+
+    torch.manual_seed(args.random_seed)
+    np.random.seed(args.random_seed)
     
     num_classes = 11
-    device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
+    device = torch.device(args.device if args.device != "auto" else
+                          "cuda" if torch.cuda.is_available() else
+                          "mps" if torch.backends.mps.is_available() else
+                          "cpu")
     print(f"Using device: {device}")
-    
-    features_cache_file = "features_cache.pkl"
+
+    features_cache_file = args.features_cache
     
     if os.path.exists(features_cache_file):
         print(f"Found feature cache: {features_cache_file}, Loading cached features...")
@@ -432,14 +457,14 @@ if __name__ == "__main__":
         print(f"Loaded.")
     else:
         print("Loading dataset...")
-        dataset = DocLayNetDataset(split="test", rewrite_storage=False)
-        if os.path.exists("data_cache.pkl"):
+        dataset = DocLayNetDataset(split=args.split, rewrite_storage=False)
+        if os.path.exists(args.data_cache):
             print("Loading data cache...")
-            dataset.load_cache(input_path="data_cache.pkl")
-        
+            dataset.load_cache(input_path=args.data_cache)
+
         feature_extractor = FeatureExtractor(dataset)
-        if not os.path.exists("data_cache.pkl"):
-            dataset.save_cache(output_path="data_cache.pkl")
+        if not os.path.exists(args.data_cache):
+            dataset.save_cache(output_path=args.data_cache)
         pages_features, pages_targets = feature_extractor.get_page_features()
         feature_dim = len(pages_features[0][0])
         
@@ -455,33 +480,33 @@ if __name__ == "__main__":
     features_and_targets = list(zip(pages_features, pages_targets))
     random.shuffle(features_and_targets)
     total = len(features_and_targets)
-    training_data = features_and_targets[:int(0.8 * total)]
-    validation_data = features_and_targets[int(0.8 * total):]
+    training_data = features_and_targets[:int(args.train_split * total)]
+    validation_data = features_and_targets[int(args.train_split * total):]
     print(f"\nTraining samples: {len(training_data)}, Validation samples: {len(validation_data)}")
     
     class_weights = compute_class_weights(pages_targets, num_classes, device)
     model = TransformerTagger(
         input_dim=feature_dim,
-        hidden_dim=256,
-        num_layers=4,
-        num_heads=8,
+        hidden_dim=args.hidden_dim,
+        num_layers=args.num_layers,
+        num_heads=args.num_heads,
         output_dim=num_classes,
-        dropout=0.2
+        dropout=args.dropout
     ).to(device)
-    
-    optimizer = optim.AdamW(model.parameters(), lr=2e-4, weight_decay=0.01)
+
+    optimizer = optim.AdamW(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10)
     
     criterion = CombinedLoss(
         num_classes=num_classes,
         alpha=class_weights,
-        gamma=2.5,
+        gamma=args.gamma,
         label_smoothing=0.1,
         ignore_index=-1
     )
     
-    BATCH_SIZE = 16
-    EPOCHS = 5
+    BATCH_SIZE = args.batch_size
+    EPOCHS = args.epochs
     
     best_accuracy = 0.0
     losses_history = []
@@ -528,6 +553,6 @@ if __name__ == "__main__":
         
         if accuracy > best_accuracy:
             best_accuracy = accuracy
-            torch.save(model.state_dict(), f'best_model-{int(time())}.pth')
+            torch.save(model.state_dict(), args.model_save_path)
     
     print(f"\nTraining completed. Best accuracy: {best_accuracy:.4f}")

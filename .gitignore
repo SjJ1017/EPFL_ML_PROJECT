@@ -4,3 +4,9 @@ test_pdfs/
 
 # macOS system files
 .DS_Store
+
+
+# data and cache
+models/
+.cache/
+test_pdf_labeled
