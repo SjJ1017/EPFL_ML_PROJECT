@@ -1,5 +1,6 @@
 from pdf_features.PdfFeatures import PdfFeatures
 from pdf_features.PdfToken import PdfToken
+from pdf_token_type_labels.TokenType import TokenType
 from pdf_features.PdfPage import PdfPage
 from tqdm import tqdm
 import numpy as np
@@ -13,9 +14,9 @@ from time import time
 
 class FeatureExtractor:
 
-    def __init__(self, dataset: DocLayNetDataset):
-        self.dataset = dataset
-
+    def __init__(self, dataset: DocLayNetDataset | list[PdfFeatures]):
+        self.dataset = dataset if isinstance(dataset, DocLayNetDataset) else None
+        self.pdfs_features = dataset if isinstance(dataset, list) and all(isinstance(pdf, PdfFeatures) for pdf in dataset) else None
         self.font_stats = None
         
     def extract_statistical_features(self, token, page, prev_token=None, next_token=None):
@@ -140,22 +141,30 @@ class FeatureExtractor:
         return pages_features, page_targets
     
     def loop_token_features(self):
-        for pdf_features in tqdm(self.dataset, desc="Extracting features"):
-            for page in pdf_features.pages:
-                if not page.tokens:
-                    continue
-                yield page
+        if self.dataset:
+            for pdf_features in tqdm(self.dataset, desc="Extracting features"):
+                for page in pdf_features.pages:
+                    if not page.tokens:
+                        continue
+                    yield page
+        elif self.pdfs_features:
+            for pdf_features in tqdm(self.pdfs_features, desc="Extracting features"):
+                for page in pdf_features.pages:
+                    if not page.tokens:
+                        continue
+                    yield page
 
 
-class TransformerTagger(nn.Module):
+class TransformerTagger(nn.Module, FeatureExtractor):
 
     def __init__(self, input_dim, hidden_dim=256, num_layers=4, num_heads=8, 
-                 output_dim=11, dropout=0.2, max_seq_len=2000):
-        super().__init__()
+                 output_dim=11, dropout=0.2, max_seq_len=2000, pdfs_features: list[PdfFeatures] = None):
+        nn.Module.__init__(self)
+        FeatureExtractor.__init__(self, pdfs_features)
         
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
-        
+            
         # LayerNorm and Dropout
         self.input_proj = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
@@ -231,7 +240,40 @@ class TransformerTagger(nn.Module):
             out = out.squeeze(0)
         
         return out
+    
+    def load_features(self, pdfs_features: PdfFeatures):
+        self.feature_extractor = FeatureExtractor(pdfs_features)
+    
 
+    def predict(self):
+        features, _ = self.get_page_features()
+        predicted_labels = []
+        self.eval()
+        with torch.no_grad():
+            for feature in features:
+                feature = torch.tensor(feature, dtype=torch.float32)
+                # print(feature.shape)
+                predictions = self(feature)
+                try:
+                    predicted = predictions.reshape(-1, predictions.size(-1)).argmax(dim=1)
+                except Exception as e:
+                    print("Error in predicting:", e)
+                    print("Predictions shape:", predictions.shape)
+                    raise e
+                predicted_labels.extend(predicted.cpu().tolist())
+                # print(len(predicted.cpu().tolist()))
+        return predicted_labels
+    
+    def labeled_features(self):
+        if self.pdfs_features is None:
+            raise ValueError("Feature extractor not loaded with PdfFeatures but with DocLayNetDataset. This method is only for PdfFeatures.")
+        labels = self.predict()
+        assert len(labels) == sum(len(page.tokens) for pdf in self.pdfs_features for page in pdf.pages)
+        for pdf in self.pdfs_features:
+            for page in pdf.pages:
+                for token in page.tokens:
+                    token.token_type = TokenType.from_index(labels.pop(0))
+        return self.pdfs_features
 
 class CombinedLoss(nn.Module):
     

@@ -457,17 +457,46 @@ class DocLayNetDatasetSegmented(DocLayNetDataset):
                 last_token.prediction = 1  # last token defined as the end of segment
         self.cache[pdf_name] = features
         return features
+    
+    def get_features_segmeted(self, idx):
+        features = self.__getitem__(idx)
+        # merge tokens into segments based on prediction
+        pages_segments = []
+        current_segment_tokens = []
+        for page in features.pages:
+            segments = []
+            for token in page.tokens:
+                current_segment_tokens.append(token)
+                if token.prediction == 1:
+                    segments.append(current_segment_tokens)
+                    current_segment_tokens = []
+            if current_segment_tokens:
+                segments.append(current_segment_tokens)
+                current_segment_tokens = []
+            pages_segments.append(segments)
+
+        pages_segments_positions = []
+        for segments in pages_segments:
+            segment_positions = []
+            for segment_tokens in segments:
+                if not segment_tokens:
+                    continue
+                merged_rectangle = Rectangle.merge_rectangles([token.bounding_box for token in segment_tokens])
+                segment_positions.append(merged_rectangle)
+            pages_segments_positions.append(segment_positions)   
+
+        return pages_segments_positions
 
 
 if __name__ == "__main__":
     # It will take 1 hour to download the whole dataset, if you have not done it yet.
-    test_dataset = DocLayNetDataset(split="test")
+    test_dataset = DocLayNetDatasetSegmented(split="test")
 
 
     example_idx = 34
     # To see the original labels in the dataset
     features = test_dataset[0]
-    print(features.pages[0].tokens[0])
+    print(test_dataset.get_features_segmeted(example_idx))
     #test_dataset.visualize_item(example_idx, output_path="viz_labels.pdf")
 
     # To see the tokens (automatically extracted) with labels, the token types are all set to "text" since no labels are provided yet.
