@@ -544,7 +544,7 @@ if __name__ == "__main__":
     best_accuracy = 0.0
     losses_history = []
     
-    model.load_state_dict(torch.load("best_larger_train.pth", map_location=device))
+    model.load_state_dict(torch.load(".cache/best_larger_train.pth", map_location=device))
     accuracy, class_acc, _, _ = evaluate_model(model, validation_data, feature_dim, device, num_classes, max_len=args.max_len)
     print("Per-class accuracy:")
     for i, acc in enumerate(class_acc):
