@@ -157,7 +157,7 @@ class FeatureExtractor:
 class TransformerTagger(nn.Module, FeatureExtractor):
 
     def __init__(self, input_dim, hidden_dim=256, num_layers=4, num_heads=8, 
-                 output_dim=11, dropout=0.2, max_seq_len=2000, pdfs_features: list[PdfFeatures] = None):
+                 output_dim=11, dropout=0.2, max_seq_len=200, pdfs_features: list[PdfFeatures] = None):
         nn.Module.__init__(self)
         FeatureExtractor.__init__(self, pdfs_features)
         
@@ -318,7 +318,7 @@ class CombinedLoss(nn.Module):
         return loss.mean()
 
 
-def collate_batch(batch_data, feature_dim, max_seq_len=2000):
+def collate_batch(batch_data, feature_dim, max_seq_len=200):
     batch_x = []
     batch_y = []
     lengths = []
@@ -342,6 +342,10 @@ def collate_batch(batch_data, feature_dim, max_seq_len=2000):
             y_padded = torch.cat([y, torch.full((pad_size,), -1, dtype=torch.long)])
             mask = torch.cat([torch.zeros(length, dtype=torch.bool), 
                             torch.ones(pad_size, dtype=torch.bool)])
+        elif pad_size < 0:
+            x_padded = x[:max_len]
+            y_padded = y[:max_len]
+            mask = torch.zeros(max_len, dtype=torch.bool)
         else:
             x_padded = x
             y_padded = y
