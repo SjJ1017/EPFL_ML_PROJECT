@@ -108,12 +108,14 @@ class DocLayNetDataset:
     ROOT_RELATIVE_FEATURE = ''
     DATASET_NAME = "docling-project/DocLayNet-v1.2" if not TINY_DATA else "SHENJJ1017/TinyDocLayNet"
 
-    def __init__(self, split="train", rewrite_storage=False):
+    def __init__(self, split="train", rewrite_storage=False, start_idx=0, end_idx=None):
         self.dataset = load_dataset(self.DATASET_NAME, split=split)
         self.split = split
         self.converted = defaultdict(bool)
         self.rewrite_storage = rewrite_storage
         self.cache = {}
+        self.start_idx = start_idx
+        self.end_idx = end_idx if end_idx else len(self.dataset)
 
     def __len__(self):
         return len(self.dataset)
@@ -309,6 +311,9 @@ class DocLayNetDataset:
             writer.write(f_out)
     
     def __getitem__(self, idx):
+        idx = idx + self.start_idx
+        if idx >= self.end_idx:
+            raise IndexError("Index out of range for the specified dataset slice.")
         pdf_name = self.get_pdf_name(idx)
         if self.cache.get(pdf_name, None):
             return self.cache[pdf_name]

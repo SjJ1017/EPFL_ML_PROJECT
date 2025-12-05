@@ -33,7 +33,6 @@ def visualize_segments(pdf_features, pdf_path, output_path: str, one_page_only: 
     
     reader = PdfReader(pdf_path)
     writer = PdfWriter()
-
     pages = pdf_features.pages 
     assert len(pages) == len(reader.pages), "Number of pages in features and PDF do not match."
 
@@ -70,7 +69,6 @@ def visualize_segments(pdf_features, pdf_path, output_path: str, one_page_only: 
 
                 ids[aggregated_label] += 1
                 segment_id = ids[aggregated_label]
-
                 can.drawString(x, y_reportlab + h + 5, f"{aggregated_label} {segment_id}")
                 waitinglist, label_waitinglist = [], []
 
@@ -86,7 +84,13 @@ def visualize_segments(pdf_features, pdf_path, output_path: str, one_page_only: 
             h = float(aggregated_rectangle.height)
             y_reportlab = height - y - h
             can.rect(x, y_reportlab, w, h, stroke=1, fill=0)
+            aggregated_label = max(set(label_waitinglist), key=label_waitinglist.count)
 
+            ids[aggregated_label] += 1
+            segment_id = ids[aggregated_label]
+
+            can.drawString(x, y_reportlab + h + 5, f"{aggregated_label} {segment_id}")
+            waitinglist, label_waitinglist = [], []
 
         can.save()
         packet.seek(0)
@@ -134,7 +138,7 @@ def main():
     model = TransformerTagger(
         input_dim=feature_dim,
         hidden_dim=256,
-        num_layers=4,
+        num_layers=8,
         num_heads=8,
         output_dim=num_classes,
         dropout=0.2,

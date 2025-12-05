@@ -432,6 +432,9 @@ if __name__ == "__main__":
     parser.add_argument("--gamma", type=float, default=2.0, help="Focusing parameter for Focal Loss")
     parser.add_argument("--weight_decay", type=float, default=0.01, help="Weight decay for optimizer")
     parser.add_argument("--model_save_path", type=str, default="best_model.pth", help="Path to save the best model")
+    parser.add_argument("--start_idx", type=int, default=0, help="Starting index for data partitioning")
+    parser.add_argument("--end_idx", type=int, default=None, help="Ending index for data partitioning")
+    parser.add_argument("--feature_split", type=int, default=None, help="Ending index for feature partitioning")
     args = parser.parse_args()
 
     torch.manual_seed(args.random_seed)
@@ -456,7 +459,7 @@ if __name__ == "__main__":
         print(f"Loaded.")
     else:
         print("Loading dataset...")
-        dataset = DocLayNetDataset(split=args.split, rewrite_storage=False)
+        dataset = DocLayNetDataset(split=args.split, rewrite_storage=False, start_idx=args.start_idx, end_idx=args.end_idx)
         if os.path.exists(args.data_cache):
             print("Loading data cache...")
             dataset.load_cache(input_path=args.data_cache)
@@ -466,15 +469,19 @@ if __name__ == "__main__":
             dataset.save_cache(output_path=args.data_cache)
         pages_features, pages_targets = feature_extractor.get_page_features()
         feature_dim = len(pages_features[0][0])
-        
         cache_data = {
-            'pages_features': pages_features,
-            'pages_targets': pages_targets,
-            'feature_dim': feature_dim
-        }
-        with open(features_cache_file, 'wb') as f:
-            pickle.dump(cache_data, f)
-    
+        'pages_features': pages_features,
+        'pages_targets': pages_targets,
+        'feature_dim': feature_dim
+    }
+        if args.feature_split is None:
+            with open(features_cache_file, 'wb') as f:
+                pickle.dump(cache_data, f)
+        else:
+            with open(features_cache_file.replace(".pkl", f"_{args.feature_split}.pkl"), 'wb') as f:
+                pickle.dump(cache_data, f)
+    if args.feature_split is not None:
+        exit(0) # Exit after saving feature partitions
     import random
     features_and_targets = list(zip(pages_features, pages_targets))
     random.shuffle(features_and_targets)
