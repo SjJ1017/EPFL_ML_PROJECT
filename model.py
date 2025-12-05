@@ -318,7 +318,7 @@ class CombinedLoss(nn.Module):
         return loss.mean()
 
 
-def collate_batch(batch_data, feature_dim):
+def collate_batch(batch_data, feature_dim, max_seq_len=2000):
     batch_x = []
     batch_y = []
     lengths = []
@@ -330,7 +330,7 @@ def collate_batch(batch_data, feature_dim):
         batch_y.append(y)
         lengths.append(len(targets))
     
-    max_len = max(lengths)
+    max_len = min(max(lengths), max_seq_len)
     padded_x = []
     padded_y = []
     masks = []
