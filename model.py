@@ -421,6 +421,7 @@ if __name__ == "__main__":
     parser.add_argument('--split', type=str, default="test", help="Dataset split to use (train/val/test)")
     parser.add_argument("--epochs", type=int, default=10, help="Number of training epochs")
     parser.add_argument("--features_cache", type=str, default=".cache/features_cache.pkl", help="Path to cache extracted features")
+    parser.add_argument("--pieces", type=int, default=1, help="Number of pieces to split the feature cache into")
     parser.add_argument("--data_cache", type=str, default=".cache/data_cache.pkl", help="Path to cache dataset")
     parser.add_argument("--train_split", type=float, default=0.8, help="Proportion of data to use for training")
     parser.add_argument("--random_seed", type=int, default=42, help="Random seed for reproducibility")
@@ -449,13 +450,25 @@ if __name__ == "__main__":
 
     features_cache_file = args.features_cache
     
-    if os.path.exists(features_cache_file):
+    if os.path.exists(features_cache_file) and args.pieces == 1:
         print(f"Found feature cache: {features_cache_file}, Loading cached features...")
         with open(features_cache_file, 'rb') as f:
             cache_data = pickle.load(f)
             pages_features = cache_data['pages_features']
             pages_targets = cache_data['pages_targets']
             feature_dim = cache_data['feature_dim']
+        print(f"Loaded.")
+    elif args.pieces > 1 and all(os.path.exists(features_cache_file.replace(".pkl", f"_{i}.pkl")) for i in range(args.pieces)):
+        print(f"Found feature cache pieces, Loading cached features...")
+        pages_features = []
+        pages_targets = []
+        for i in range(args.pieces):
+            print(f" Loading piece {i+1}/{args.pieces}...")
+            with open(features_cache_file.replace(".pkl", f"_{i}.pkl"), 'rb') as f:
+                cache_data = pickle.load(f)
+                pages_features.extend(cache_data['pages_features'])
+                pages_targets.extend(cache_data['pages_targets'])
+                feature_dim = cache_data['feature_dim']
         print(f"Loaded.")
     else:
         print("Loading dataset...")
