@@ -142,7 +142,8 @@ def main():
         num_heads=8,
         output_dim=num_classes,
         dropout=0.2,
-        pdfs_features= [pdf_features]
+        pdfs_features= [pdf_features],
+        max_seq_len=200,
     ).to(device)
     
     model.load_state_dict(torch.load(args.model, map_location=device))
@@ -157,7 +158,8 @@ def main():
         num_heads=8,
         output_dim=2,
         dropout=0.2,
-        pdfs_features= [pdf_features]
+        pdfs_features= [pdf_features],
+        max_seq_len=2000
     ).to(device)
     model_segment.load_state_dict(torch.load(args.segment_model, map_location=device))
     pdf_features = model_segment.labeled_features()[0]
