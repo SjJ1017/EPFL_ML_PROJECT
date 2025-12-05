@@ -380,16 +380,24 @@ def compute_class_weights(pages_targets, num_classes, device):
     return class_weights
 
 
-def evaluate_model(model, validation_data, feature_dim, device, num_classes):
+def evaluate_model(model, validation_data, feature_dim, device, num_classes, max_len=200):
     model.eval()
     all_preds = []
     all_targets = []
     
     with torch.no_grad():
         for page_features, targets in validation_data:
-            x = torch.tensor(page_features, dtype=torch.float32).unsqueeze(0).to(device)
+            x = torch.tensor(page_features, dtype=torch.float32).to(device)
             y = torch.tensor(targets, dtype=torch.long)
             
+
+            if x.shape[0] > max_len:
+                x = x[:max_len, :] 
+
+            x = x.unsqueeze(0)
+            
+            if y.shape[0] > max_len:
+                y = y[:max_len]
             pred = model(x)
             _, predicted = torch.max(pred.squeeze(0), dim=1)
             
@@ -440,6 +448,7 @@ if __name__ == "__main__":
     parser.add_argument("--start_idx", type=int, default=0, help="Starting index for data partitioning")
     parser.add_argument("--end_idx", type=int, default=None, help="Ending index for data partitioning")
     parser.add_argument("--feature_split", type=int, default=None, help="Ending index for feature partitioning")
+    parser.add_argument("--max_len", type=int, default=200, help="Maximum sequence length for model input")
     args = parser.parse_args()
 
     torch.manual_seed(args.random_seed)
@@ -514,7 +523,8 @@ if __name__ == "__main__":
         num_layers=args.num_layers,
         num_heads=args.num_heads,
         output_dim=num_classes,
-        dropout=args.dropout
+        dropout=args.dropout,
+        max_seq_len=args.max_len,
     ).to(device)
 
     optimizer = optim.AdamW(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
@@ -542,7 +552,7 @@ if __name__ == "__main__":
         for i in pbar:
             batch_data = training_data[i:i+BATCH_SIZE]
             
-            x, y, masks, lengths = collate_batch(batch_data, feature_dim)
+            x, y, masks, lengths = collate_batch(batch_data, feature_dim, max_seq_len=args.max_len)
             x, y, masks = x.to(device), y.to(device), masks.to(device)
             
             optimizer.zero_grad()
@@ -565,9 +575,8 @@ if __name__ == "__main__":
                 pbar.set_postfix({'loss': f'{np.mean(epoch_losses[-100:]):.4f}'})
         
         scheduler.step()
-        
         print(f"\nEvaluating epoch {epoch+1}...")
-        accuracy, class_acc, _, _ = evaluate_model(model, validation_data, feature_dim, device, num_classes)
+        accuracy, class_acc, _, _ = evaluate_model(model, validation_data, feature_dim, device, num_classes, max_len=args.max_len)
         
         print(f"Epoch {epoch+1} - Overall Accuracy: {accuracy:.4f}")
         print("Per-class accuracy:")
