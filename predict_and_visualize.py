@@ -131,8 +131,13 @@ def visualize_segments(pdf_features, pdf_path, output_path: str, one_page_only: 
         print(f"Warning: {len(pages)} pages in features but only {len(reader.pages)} in PDF. Using PDF page count.")
         pages = pages[:len(reader.pages)]
 
+    total_segments = 0
+    
     for page_idx, page_features in enumerate(pages):
         tokens = page_features.tokens
+        if len(tokens) == 0:
+            continue
+            
         page = reader.pages[page_idx]
 
         packet = io.BytesIO()
@@ -140,21 +145,19 @@ def visualize_segments(pdf_features, pdf_path, output_path: str, one_page_only: 
         height = float(page.mediabox.height)
         can = canvas.Canvas(packet, pagesize=(width, height))
         
-        # Reset per page
-        waitinglist = []
-        label_waitinglist = []
-        ids = defaultdict(int)
-
-        # Draw segments on page
-        for token in tokens:
-            # Check if token has prediction attribute
-            prediction = getattr(token, 'prediction', 1)  # Default to 1 (boundary) if no segment model
+        # Group tokens into segments
+        segments = []  # [(boxes, labels), ...]
+        current_segment_boxes = []
+        current_segment_labels = []
+        
+        for i, token in enumerate(tokens):
+            # Get prediction
+            prediction = getattr(token, 'prediction', 1)
             
-            # Use _predicted_label if available (string), otherwise convert TokenType to string
+            # Get token type label
             if hasattr(token, '_predicted_label'):
                 token_type = token._predicted_label
             elif hasattr(token, 'token_type'):
-                # Convert TokenType object to string
                 if hasattr(token.token_type, 'name'):
                     token_type = token.token_type.name
                 else:
@@ -162,47 +165,70 @@ def visualize_segments(pdf_features, pdf_path, output_path: str, one_page_only: 
             else:
                 token_type = 'Unknown'
             
-            label_waitinglist.append(token_type)
-
-            if prediction == 1:  # Segment boundary
-                if waitinglist:  # Only draw if there are tokens accumulated
-                    aggregated_rectangle = Rectangle.merge_rectangles(waitinglist + [token.bounding_box])
-
-                    x = float(aggregated_rectangle.left)
-                    y = float(aggregated_rectangle.top)
-                    w = float(aggregated_rectangle.width)
-                    h = float(aggregated_rectangle.height)
-                    y_reportlab = height - y - h
-
-                    can.rect(x, y_reportlab, w, h, stroke=1, fill=0)
-                    aggregated_label = max(set(label_waitinglist), key=label_waitinglist.count)
-
-                    ids[aggregated_label] += 1
-                    segment_id = ids[aggregated_label]
-                    can.drawString(x, y_reportlab + h + 5, f"{aggregated_label} {segment_id}")
-                
-                waitinglist = [token.bounding_box]
-                label_waitinglist = [token_type]
-
-            else:
-                waitinglist.append(token.bounding_box)
-
-        # Handle last cluster if unfinished
-        if waitinglist:
-            aggregated_rectangle = Rectangle.merge_rectangles(waitinglist)
-            x = float(aggregated_rectangle.left)
-            y = float(aggregated_rectangle.top)
-            w = float(aggregated_rectangle.width)
-            h = float(aggregated_rectangle.height)
+            # Check if this token is a boundary
+            is_boundary = (prediction == 1)
+            
+            # If this is a boundary AND not the first token, save previous segment
+            if is_boundary and i > 0 and current_segment_boxes:
+                segments.append({
+                    'boxes': current_segment_boxes[:],  # Copy list
+                    'labels': current_segment_labels[:]
+                })
+                current_segment_boxes = []
+                current_segment_labels = []
+            
+            # Add current token to the current segment
+            current_segment_boxes.append(token.bounding_box)
+            current_segment_labels.append(token_type)
+        
+        # Don't forget the last segment
+        if current_segment_boxes:
+            segments.append({
+                'boxes': current_segment_boxes,
+                'labels': current_segment_labels
+            })
+        
+        # Draw all segments
+        segment_ids = defaultdict(int)
+        
+        for segment in segments:
+            if not segment['boxes']:
+                continue
+            
+            # Merge all boxes in this segment
+            merged_box = Rectangle.merge_rectangles(segment['boxes'])
+            
+            # Get most common label in this segment
+            most_common_label = max(set(segment['labels']), key=segment['labels'].count)
+            
+            # Calculate position
+            x = float(merged_box.left)
+            y = float(merged_box.top)
+            w = float(merged_box.width)
+            h = float(merged_box.height)
             y_reportlab = height - y - h
+            
+            # Draw rectangle
+            can.setStrokeColorRGB(0, 0, 1)  # Blue color
+            can.setLineWidth(1)
             can.rect(x, y_reportlab, w, h, stroke=1, fill=0)
-            aggregated_label = max(set(label_waitinglist), key=label_waitinglist.count)
-
-            ids[aggregated_label] += 1
-            segment_id = ids[aggregated_label]
-
-            can.drawString(x, y_reportlab + h + 5, f"{aggregated_label} {segment_id}")
-
+            
+            # Draw label with background
+            segment_ids[most_common_label] += 1
+            segment_id = segment_ids[most_common_label]
+            label_text = f"{most_common_label} {segment_id}"
+            
+            # Draw label background
+            can.setFillColorRGB(1, 1, 0.8)  # Light yellow background
+            label_y = y_reportlab + h + 2
+            can.rect(x, label_y, len(label_text) * 6, 12, stroke=0, fill=1)
+            
+            # Draw label text
+            can.setFillColorRGB(0, 0, 0)  # Black text
+            can.drawString(x + 2, label_y + 2, label_text)
+            
+            total_segments += 1
+        
         can.save()
         packet.seek(0)
 
@@ -217,7 +243,11 @@ def visualize_segments(pdf_features, pdf_path, output_path: str, one_page_only: 
     with open(output_path, "wb") as f_out:
         writer.write(f_out)
     
-    print(f"Visualization complete! Processed {len(pages) if not one_page_only else 1} page(s).")
+    num_pages = len(pages) if not one_page_only else 1
+    print(f"Visualization complete!")
+    print(f"  Processed: {num_pages} page(s)")
+    print(f"  Total segments: {total_segments}")
+    print(f"  Avg segments per page: {total_segments / num_pages:.1f}")
 
 def main():
     parser = argparse.ArgumentParser(description="Predict and visualize PDF segments")
