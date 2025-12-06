@@ -121,6 +121,77 @@ def predict_segments(model, pdf_features, device, max_tokens=512):
     return pdf_features
 
 
+def split_large_segments(segments, page_width, page_height, max_width_ratio=0.7):
+    """
+    Split segments that are abnormally large (likely due to scattered tokens)
+    
+    Args:
+        segments: List of segment dicts
+        page_width: Page width
+        page_height: Page height
+        max_width_ratio: Maximum allowed width as ratio of page width
+    
+    Returns:
+        List of split segments
+    """
+    result = []
+    
+    for segment in segments:
+        if not segment['boxes']:
+            continue
+        
+        # Check if segment is abnormally wide
+        merged_box = Rectangle.merge_rectangles(segment['boxes'])
+        width = merged_box.width
+        width_ratio = width / page_width
+        
+        # If segment is too wide, split by horizontal clusters
+        if width_ratio > max_width_ratio:
+            # Group boxes by horizontal position
+            boxes_with_labels = list(zip(segment['boxes'], segment['labels']))
+            boxes_with_labels.sort(key=lambda x: x[0].left)  # Sort by left position
+            
+            # Split into clusters based on horizontal gaps
+            clusters = []
+            current_cluster_boxes = []
+            current_cluster_labels = []
+            
+            for box, label in boxes_with_labels:
+                if not current_cluster_boxes:
+                    current_cluster_boxes.append(box)
+                    current_cluster_labels.append(label)
+                else:
+                    # Check horizontal gap with previous box
+                    prev_box = current_cluster_boxes[-1]
+                    horizontal_gap = (box.left - prev_box.right) / page_width
+                    
+                    # If gap is large (> 10% of page width), start new cluster
+                    if horizontal_gap > 0.1:
+                        clusters.append({
+                            'boxes': current_cluster_boxes,
+                            'labels': current_cluster_labels
+                        })
+                        current_cluster_boxes = [box]
+                        current_cluster_labels = [label]
+                    else:
+                        current_cluster_boxes.append(box)
+                        current_cluster_labels.append(label)
+            
+            # Don't forget last cluster
+            if current_cluster_boxes:
+                clusters.append({
+                    'boxes': current_cluster_boxes,
+                    'labels': current_cluster_labels
+                })
+            
+            result.extend(clusters)
+        else:
+            # Normal segment
+            result.append(segment)
+    
+    return result
+
+
 def visualize_segments(pdf_features, pdf_path, output_path: str, one_page_only: bool = False):
     """Visualize predicted segments on PDF"""
     reader = PdfReader(pdf_path)
@@ -132,6 +203,7 @@ def visualize_segments(pdf_features, pdf_path, output_path: str, one_page_only: 
         pages = pages[:len(reader.pages)]
 
     total_segments = 0
+    total_segments_before_split = 0
     
     for page_idx, page_features in enumerate(pages):
         tokens = page_features.tokens
@@ -187,6 +259,14 @@ def visualize_segments(pdf_features, pdf_path, output_path: str, one_page_only: 
                 'boxes': current_segment_boxes,
                 'labels': current_segment_labels
             })
+        
+        total_segments_before_split = len(segments)
+        
+        # Split abnormally large segments
+        segments = split_large_segments(segments, width, height, max_width_ratio=0.7)
+        
+        if len(segments) > total_segments_before_split:
+            print(f"  Page {page_idx + 1}: Split {total_segments_before_split} → {len(segments)} segments")
         
         # Draw all segments
         segment_ids = defaultdict(int)
