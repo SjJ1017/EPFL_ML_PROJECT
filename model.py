@@ -118,7 +118,7 @@ class FeatureExtractor:
         for page in self.loop_token_features():
             tokens = page.tokens
             if len(tokens) == 0:
-                continue
+                continue  # Skip empty pages
                 
             targets = []
             feature_rows = []
@@ -134,8 +134,10 @@ class FeatureExtractor:
                 feature_rows.append(features)
                 targets.append(token.token_type.get_index())
             
-            pages_features.append(feature_rows)
-            page_targets.append(targets)
+            # Only add non-empty pages
+            if len(feature_rows) > 0:
+                pages_features.append(feature_rows)
+                page_targets.append(targets)
         
         return pages_features, page_targets
     
@@ -226,11 +228,6 @@ class TransformerTagger(nn.Module, FeatureExtractor):
         
         x_emb = x_emb + self.pos_embedding[:seq_len].unsqueeze(0)
         
-        if mask is not None:
-            attn_mask = mask.float().masked_fill(mask, float('-inf')).masked_fill(~mask, 0.0)
-        else:
-            attn_mask = None
-        
         encoded = self.encoder(x_emb, src_key_padding_mask=mask)
         
         out = self.output_proj(encoded)
@@ -248,10 +245,15 @@ class TransformerTagger(nn.Module, FeatureExtractor):
         features, _ = self.get_page_features()
         predicted_labels = []
         self.eval()
+        
+        # Ensure model is on the same device as input features
+        device = next(self.parameters()).device
+        
         with torch.no_grad():
             for feature in features:
-                feature = torch.tensor(feature, dtype=torch.float32)
-                # print(feature.shape)
+                
+                feature = torch.tensor(feature, dtype=torch.float32).to(device)
+                
                 predictions = self(feature)
                 try:
                     predicted = predictions.reshape(-1, predictions.size(-1)).argmax(dim=1)
@@ -259,8 +261,10 @@ class TransformerTagger(nn.Module, FeatureExtractor):
                     print("Error in predicting:", e)
                     print("Predictions shape:", predictions.shape)
                     raise e
+                
+                # move predicted labels back to CPU before extending the list
                 predicted_labels.extend(predicted.cpu().tolist())
-                # print(len(predicted.cpu().tolist()))
+    
         return predicted_labels
     
     def labeled_features(self):
@@ -271,7 +275,9 @@ class TransformerTagger(nn.Module, FeatureExtractor):
         for pdf in self.pdfs_features:
             for page in pdf.pages:
                 for token in page.tokens:
-                    token.token_type = TokenType.from_index(labels.pop(0))
+                    pred = labels.pop(0)
+                    token.token_type = TokenType.from_index(pred)
+                    token._predicted_type = pred  # add predicted_type attribute
         return self.pdfs_features
 
 class CombinedLoss(nn.Module):
@@ -336,20 +342,27 @@ def collate_batch(batch_data, feature_dim, max_seq_len=200):
     masks = []
     
     for x, y, length in zip(batch_x, batch_y, lengths):
+        # Truncate if longer than max_len
+        if length > max_len:
+            x = x[:max_len]
+            y = y[:max_len]
+            length = max_len
+        
         pad_size = max_len - length
+        
         if pad_size > 0:
+            # Add padding
             x_padded = torch.cat([x, torch.zeros(pad_size, feature_dim)], dim=0)
             y_padded = torch.cat([y, torch.full((pad_size,), -1, dtype=torch.long)])
-            mask = torch.cat([torch.zeros(length, dtype=torch.bool), 
-                            torch.ones(pad_size, dtype=torch.bool)])
-        elif pad_size < 0:
-            x_padded = x[:max_len]
-            y_padded = y[:max_len]
-            mask = torch.zeros(max_len, dtype=torch.bool)
+            # mask: True for padding (to be ignored), False for valid tokens
+            mask = torch.cat([
+                torch.zeros(length, dtype=torch.bool),    # False = valid
+                torch.ones(pad_size, dtype=torch.bool)    # True = padding
+            ])
         else:
             x_padded = x
             y_padded = y
-            mask = torch.zeros(length, dtype=torch.bool)
+            mask = torch.zeros(length, dtype=torch.bool)  # All valid
         
         padded_x.append(x_padded)
         padded_y.append(y_padded)
@@ -357,7 +370,7 @@ def collate_batch(batch_data, feature_dim, max_seq_len=200):
     
     batch_x = torch.stack(padded_x)  # (batch_size, max_len, feature_dim)
     batch_y = torch.stack(padded_y)  # (batch_size, max_len)
-    masks = torch.stack(masks)  # (batch_size, max_len)
+    masks = torch.stack(masks)       # (batch_size, max_len)
     
     return batch_x, batch_y, masks, lengths
 
@@ -384,29 +397,63 @@ def evaluate_model(model, validation_data, feature_dim, device, num_classes, max
     model.eval()
     all_preds = []
     all_targets = []
+    total_loss = 0
+    num_batches = 0
+    
+    # Define loss criterion
+    criterion = CombinedLoss(
+        num_classes=num_classes,
+        alpha=None,  # Do not use class weights during validation
+        gamma=2.0,
+        label_smoothing=0.1,
+        ignore_index=-1
+    )
     
     with torch.no_grad():
         for page_features, targets in validation_data:
+            # Skip empty pages
+            if len(page_features) == 0:
+                continue
+            
             x = torch.tensor(page_features, dtype=torch.float32).to(device)
             y = torch.tensor(targets, dtype=torch.long)
             
-
+            # Truncate if needed
             if x.shape[0] > max_len:
-                x = x[:max_len, :] 
-
-            x = x.unsqueeze(0)
-            
-            if y.shape[0] > max_len:
+                x = x[:max_len, :]
                 y = y[:max_len]
-            pred = model(x)
+            
+            # Create mask for this single sample
+            seq_len = x.shape[0]
+            mask = torch.zeros(seq_len, dtype=torch.bool).to(device)  # All valid tokens
+            
+            x = x.unsqueeze(0)  # [1, seq_len, feature_dim]
+            mask = mask.unsqueeze(0)  # [1, seq_len]
+            
+            # Pass mask to model
+            pred = model(x, mask=mask)
+            
+            # Compute loss
+            pred_flat = pred.view(-1, num_classes)
+            y_flat = y.to(device).view(-1)
+            loss = criterion(pred_flat, y_flat)
+            total_loss += loss.item()
+            num_batches += 1
+            
             _, predicted = torch.max(pred.squeeze(0), dim=1)
             
             all_preds.extend(predicted.cpu().tolist())
             all_targets.extend(y.tolist())
     
-    correct = sum(p == t for p, t in zip(all_preds, all_targets))
-    accuracy = correct / len(all_targets)
+    # Handle case when no valid batches
+    if num_batches == 0:
+        return 0.0, 0.0, [0.0] * num_classes
     
+    avg_loss = total_loss / num_batches
+    correct = sum(p == t for p, t in zip(all_preds, all_targets))
+    accuracy = correct / len(all_targets) if len(all_targets) > 0 else 0.0
+    
+    # Per-class accuracy
     class_correct = [0] * num_classes
     class_total = [0] * num_classes
     
@@ -417,7 +464,8 @@ def evaluate_model(model, validation_data, feature_dim, device, num_classes, max
     
     class_acc = [class_correct[i] / (class_total[i] + 1e-6) for i in range(num_classes)]
     
-    return accuracy, class_acc, all_preds, all_targets
+    # Return accuracy, loss, class_acc (3 values)
+    return accuracy, avg_loss, class_acc
 
 
 if __name__ == "__main__":
@@ -510,6 +558,14 @@ if __name__ == "__main__":
         exit(0) # Exit after saving feature partitions
     import random
     features_and_targets = list(zip(pages_features, pages_targets))
+    
+    # Filter out empty pages
+    original_count = len(features_and_targets)
+    features_and_targets = [(f, t) for f, t in features_and_targets if len(f) > 0]
+    filtered_count = original_count - len(features_and_targets)
+    if filtered_count > 0:
+        print(f"Filtered out {filtered_count} empty pages")
+    
     random.shuffle(features_and_targets)
     total = len(features_and_targets)
     training_data = features_and_targets[:int(args.train_split * total)]
@@ -576,9 +632,9 @@ if __name__ == "__main__":
         
         scheduler.step()
         print(f"\nEvaluating epoch {epoch+1}...")
-        accuracy, class_acc, _, _ = evaluate_model(model, validation_data, feature_dim, device, num_classes, max_len=args.max_len)
+        accuracy, val_loss, class_acc = evaluate_model(model, validation_data, feature_dim, device, num_classes, max_len=args.max_len)
         
-        print(f"Epoch {epoch+1} - Overall Accuracy: {accuracy:.4f}")
+        print(f"Epoch {epoch+1} - Overall Accuracy: {accuracy:.4f}, Val Loss: {val_loss:.4f}")
         print("Per-class accuracy:")
         for i, acc in enumerate(class_acc):
             print(f"  Class {i}: {acc:.4f}")
