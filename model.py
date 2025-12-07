@@ -157,7 +157,7 @@ class FeatureExtractor:
 class TransformerTagger(nn.Module, FeatureExtractor):
 
     def __init__(self, input_dim, hidden_dim=256, num_layers=4, num_heads=8, 
-                 output_dim=11, dropout=0.2, max_seq_len=200, pdfs_features: list[PdfFeatures] = None):
+                 output_dim=11, dropout=0.2, max_seq_len=512, pdfs_features: list[PdfFeatures] = None):
         nn.Module.__init__(self)
         FeatureExtractor.__init__(self, pdfs_features)
         
@@ -248,9 +248,11 @@ class TransformerTagger(nn.Module, FeatureExtractor):
         features, _ = self.get_page_features()
         predicted_labels = []
         self.eval()
+        device = next(self.parameters()).device
+
         with torch.no_grad():
             for feature in features:
-                feature = torch.tensor(feature, dtype=torch.float32)
+                feature = torch.tensor(feature, dtype=torch.float32).to(device)
                 # print(feature.shape)
                 predictions = self(feature)
                 try:
@@ -318,7 +320,7 @@ class CombinedLoss(nn.Module):
         return loss.mean()
 
 
-def collate_batch(batch_data, feature_dim, max_seq_len=200):
+def collate_batch(batch_data, feature_dim, max_seq_len=512):
     batch_x = []
     batch_y = []
     lengths = []
@@ -380,7 +382,7 @@ def compute_class_weights(pages_targets, num_classes, device):
     return class_weights
 
 
-def evaluate_model(model, validation_data, feature_dim, device, num_classes, max_len=200):
+def evaluate_model(model, validation_data, feature_dim, device, num_classes, max_len=512):
     model.eval()
     all_preds = []
     all_targets = []
@@ -448,7 +450,7 @@ if __name__ == "__main__":
     parser.add_argument("--start_idx", type=int, default=0, help="Starting index for data partitioning")
     parser.add_argument("--end_idx", type=int, default=None, help="Ending index for data partitioning")
     parser.add_argument("--feature_split", type=int, default=None, help="Ending index for feature partitioning")
-    parser.add_argument("--max_len", type=int, default=200, help="Maximum sequence length for model input")
+    parser.add_argument("--max_len", type=int, default=512, help="Maximum sequence length for model input")
     args = parser.parse_args()
 
     torch.manual_seed(args.random_seed)

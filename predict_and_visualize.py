@@ -131,7 +131,7 @@ def main():
     
     pdf_features = ModifiedPdfFeatures.from_pdf_path(args.pdf)
     for page in pdf_features.pages:
-        page.tokens = page.tokens[:200]  # Limit to first 1000 tokens per page for memory efficiency
+        page.tokens = page.tokens[:512]  # Limit to first 512 tokens per page for memory efficiency
     
     feature_dim = 39
 
@@ -145,7 +145,7 @@ def main():
         output_dim=num_classes,
         dropout=0.2,
         pdfs_features= [pdf_features],
-        max_seq_len=200,
+        max_seq_len=512,
     ).to(device)
     
     model.load_state_dict(torch.load(args.model, map_location=device))
@@ -161,7 +161,7 @@ def main():
         output_dim=2,
         dropout=0.2,
         pdfs_features= [pdf_features],
-        max_seq_len=2000
+        max_seq_len=512
     ).to(device)
     model_segment.load_state_dict(torch.load(args.segment_model, map_location=device))
     pdf_features = model_segment.labeled_features()[0]

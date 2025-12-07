@@ -136,6 +136,7 @@ class FeatureExtractorSegment(FeatureExtractor):
             page_targets.append(targets)
         
         return pages_features, page_targets
+    
 class TransformerTaggerSegment(TransformerTagger, FeatureExtractorSegment):
     def __init__(self, *args, **kwargs):
         TransformerTagger.__init__(self, *args, **kwargs)
@@ -179,6 +180,9 @@ if __name__ == "__main__":
     parser.add_argument("--gamma", type=float, default=2.0, help="Focusing parameter for Focal Loss")
     parser.add_argument("--weight_decay", type=float, default=0.01, help="Weight decay for optimizer")
     parser.add_argument("--model_save_path", type=str, default="best_model.pth", help="Path to save the best model")
+    parser.add_argument("--predictions_file", type=str, default=None, help="Prelabeled predictions from classification model (pkl file)")
+    parser.add_argument("--max_seq_len", type=int, default=512, help="Max sequence length (must match classification model)")
+    
     args = parser.parse_args()
 
 
@@ -212,9 +216,41 @@ if __name__ == "__main__":
             print("Loading data cache...")
             dataset.load_cache(input_path=args.data_cache)
         
+        # If predictions_file is provided, inject predictions into dataset
+        if args.predictions_file and os.path.exists(args.predictions_file):
+            print(f"Loading predictions from {args.predictions_file}...")
+            with open(args.predictions_file, 'rb') as f:
+                predictions = pickle.load(f)  # {pdf_idx: {page_idx: [pred1, pred2, ...]}}
+            
+            injected_count = 0
+            # Inject predictions into dataset
+            for pdf_idx in tqdm(range(len(dataset)), desc="Injecting predictions"):
+                if pdf_idx not in predictions:
+                    continue
+                
+                pdf_features = dataset[pdf_idx]
+                for page_idx, page in enumerate(pdf_features.pages):
+                    if page_idx not in predictions[pdf_idx]:
+                        continue
+                    
+                    page_preds = predictions[pdf_idx][page_idx]
+                    truncate_len = min(len(page.tokens), len(page_preds), args.max_seq_len)
+                    page_preds = page_preds[:truncate_len]
+                    page.tokens = page.tokens[:truncate_len]  # Ensure length matches
+                    
+                    for token_idx, token in enumerate(page.tokens):
+                        if token_idx < len(page_preds):
+                            # Inject predictions into token.token_type
+                            token.token_type = TokenType.from_index(page_preds[token_idx])
+                            injected_count += 1
+
+            print(f"Injected {injected_count} predictions into dataset.")
+
+
         feature_extractor = FeatureExtractorSegment(dataset)
         if not os.path.exists(args.data_cache):
             dataset.save_cache(output_path=args.data_cache)
+
         pages_features, pages_targets = feature_extractor.get_page_features()
         feature_dim = len(pages_features[0][0])
         
@@ -241,7 +277,8 @@ if __name__ == "__main__":
         num_layers=args.num_layers,
         num_heads=args.num_heads,
         output_dim=num_classes,
-        dropout=args.dropout
+        dropout=args.dropout,
+        max_seq_len=args.max_seq_len
     ).to(device)
 
     optimizer = optim.AdamW(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
@@ -306,3 +343,4 @@ if __name__ == "__main__":
             torch.save(model.state_dict(), args.model_save_path)
     
     print(f"\nTraining completed. Best accuracy: {best_accuracy:.4f}")
+
