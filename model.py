@@ -1,5 +1,6 @@
 from pdf_features.PdfFeatures import PdfFeatures
 from pdf_features.PdfToken import PdfToken
+from pdf_token_type_labels.TokenType import TokenType
 from pdf_features.PdfPage import PdfPage
 from tqdm import tqdm
 import numpy as np
@@ -10,9 +11,13 @@ import torch.nn as nn
 import torch.optim as optim
 from collections import Counter
 from time import time
-from model import *
 
-class FeatureExtractorSegment(FeatureExtractor):
+class FeatureExtractor:
+
+    def __init__(self, dataset: DocLayNetDataset | list[PdfFeatures]):
+        self.dataset = dataset if isinstance(dataset, DocLayNetDataset) else None
+        self.pdfs_features = dataset if isinstance(dataset, list) and all(isinstance(pdf, PdfFeatures) for pdf in dataset) else None
+        self.font_stats = None
         
     def extract_statistical_features(self, token, page, prev_token=None, next_token=None):
 
@@ -20,7 +25,6 @@ class FeatureExtractorSegment(FeatureExtractor):
         
         content = token.content
         features.extend([
-            token.token_type.get_index(),
             len(content),  
             len(content.split()),  
             sum(1 for c in content if c.isupper()) / (len(content) + 1e-6), 
@@ -82,14 +86,13 @@ class FeatureExtractorSegment(FeatureExtractor):
             font_size_diff = font_size - float(prev_token.font.font_size)
             
             features.extend([
-                prev_token.token_type.get_index(),
                 horizontal_dist,
                 vertical_dist,
                 same_line,
                 font_size_diff,
             ])
         else:
-            features.extend([0.0, 0.0, 0.0, 0.0, 0.0])
+            features.extend([0.0, 0.0, 0.0, 0.0])
         
         if next_token:
             next_box = next_token.bounding_box
@@ -99,14 +102,13 @@ class FeatureExtractorSegment(FeatureExtractor):
             font_size_diff = float(next_token.font.font_size) - font_size
             
             features.extend([
-                next_token.token_type.get_index(),
                 horizontal_dist,
                 vertical_dist,
                 same_line,
                 font_size_diff,
             ])
         else:
-            features.extend([0.0, 0.0, 0.0, 0.0, 0.0])
+            features.extend([0.0, 0.0, 0.0, 0.0])
         
         return features
     
@@ -130,19 +132,137 @@ class FeatureExtractorSegment(FeatureExtractor):
                 )
                 
                 feature_rows.append(features)
-                targets.append(token.prediction)
+                targets.append(token.token_type.get_index())
             
             pages_features.append(feature_rows)
             page_targets.append(targets)
         
         return pages_features, page_targets
-class TransformerTaggerSegment(TransformerTagger, FeatureExtractorSegment):
-    def __init__(self, *args, **kwargs):
-        TransformerTagger.__init__(self, *args, **kwargs)
-        # find pdfs_features in args or kwargs
-        pdfs_features = kwargs.get("pdfs_features", None)
-        FeatureExtractorSegment.__init__(self, pdfs_features)
+    
+    def loop_token_features(self):
+        if self.dataset:
+            for pdf_features in tqdm(self.dataset, desc="Extracting features"):
+                for page in pdf_features.pages:
+                    if not page.tokens:
+                        continue
+                    yield page
+        elif self.pdfs_features:
+            for pdf_features in tqdm(self.pdfs_features, desc="Extracting features"):
+                for page in pdf_features.pages:
+                    if not page.tokens:
+                        continue
+                    yield page
 
+
+class TransformerTagger(nn.Module, FeatureExtractor):
+
+    def __init__(self, input_dim, hidden_dim=256, num_layers=4, num_heads=8, 
+                 output_dim=11, dropout=0.2, max_seq_len=200, pdfs_features: list[PdfFeatures] = None):
+        nn.Module.__init__(self)
+        FeatureExtractor.__init__(self, pdfs_features)
+        
+        self.input_dim = input_dim
+        self.hidden_dim = hidden_dim
+            
+        # LayerNorm and Dropout
+        self.input_proj = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.LayerNorm(hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.LayerNorm(hidden_dim)
+        )
+        
+        self.pos_embedding = self._create_positional_encoding(max_seq_len, hidden_dim)
+        
+        # Transformer Encoder
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=hidden_dim,
+            nhead=num_heads,
+            dim_feedforward=hidden_dim * 4,
+            dropout=dropout,
+            activation='gelu',
+            batch_first=True  
+        )
+        self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+        
+        self.output_proj = nn.Sequential(
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.LayerNorm(hidden_dim // 2),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim // 2, output_dim)
+        )
+        
+        self._init_weights()
+    
+    def _create_positional_encoding(self, max_len, d_model):
+        pe = torch.zeros(max_len, d_model)
+        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-np.log(10000.0) / d_model))
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        return nn.Parameter(pe, requires_grad=True)
+    
+    def _init_weights(self):
+        for module in self.modules():
+            if isinstance(module, nn.Linear):
+                nn.init.xavier_uniform_(module.weight)
+                if module.bias is not None:
+                    nn.init.constant_(module.bias, 0)
+    
+    def forward(self, x, mask=None):
+        if x.dim() == 2:
+            x = x.unsqueeze(0)
+            squeeze_output = True
+        else:
+            squeeze_output = False
+        
+        batch_size, seq_len, _ = x.shape
+        
+        x_emb = self.input_proj(x)  # (batch_size, seq_len, hidden_dim)
+        
+        x_emb = x_emb + self.pos_embedding[:seq_len].unsqueeze(0)
+        
+        if mask is not None:
+            attn_mask = mask.float().masked_fill(mask, float('-inf')).masked_fill(~mask, 0.0)
+        else:
+            attn_mask = None
+        
+        encoded = self.encoder(x_emb, src_key_padding_mask=mask)
+        
+        out = self.output_proj(encoded)
+        
+        if squeeze_output:
+            out = out.squeeze(0)
+        
+        return out
+    
+    def load_features(self, pdfs_features: PdfFeatures):
+        self.feature_extractor = FeatureExtractor(pdfs_features)
+    
+
+    def predict(self):
+        features, _ = self.get_page_features()
+        predicted_labels = []
+        self.eval()
+        with torch.no_grad():
+            for feature in features:
+                feature = torch.tensor(feature, dtype=torch.float32)
+                # print(feature.shape)
+                predictions = self(feature)
+                try:
+                    predicted = predictions.reshape(-1, predictions.size(-1)).argmax(dim=1)
+                except Exception as e:
+                    print("Error in predicting:", e)
+                    print("Predictions shape:", predictions.shape)
+                    raise e
+                predicted_labels.extend(predicted.cpu().tolist())
+                # print(len(predicted.cpu().tolist()))
+        return predicted_labels
+    
     def labeled_features(self):
         if self.pdfs_features is None:
             raise ValueError("Feature extractor not loaded with PdfFeatures but with DocLayNetDataset. This method is only for PdfFeatures.")
@@ -151,10 +271,155 @@ class TransformerTaggerSegment(TransformerTagger, FeatureExtractorSegment):
         for pdf in self.pdfs_features:
             for page in pdf.pages:
                 for token in page.tokens:
-                    pred = labels.pop(0)
-                    token.prediction = pred
+                    token.token_type = TokenType.from_index(labels.pop(0))
         return self.pdfs_features
+
+class CombinedLoss(nn.Module):
     
+    def __init__(self, num_classes, alpha=None, gamma=2.0, label_smoothing=0.1, ignore_index=-1):
+        super().__init__()
+        self.num_classes = num_classes
+        self.alpha = alpha
+        self.gamma = gamma
+        self.label_smoothing = label_smoothing
+        self.ignore_index = ignore_index
+    
+    def forward(self, logits, targets):
+        valid_mask = (targets != self.ignore_index)
+        if valid_mask.sum() == 0:
+            return torch.tensor(0.0, device=logits.device, requires_grad=True)
+        
+        logits_valid = logits[valid_mask]
+        targets_valid = targets[valid_mask]
+        
+        # Label smoothing
+        with torch.no_grad():
+            true_dist = torch.zeros_like(logits_valid)
+            true_dist.fill_(self.label_smoothing / (self.num_classes - 1))
+            true_dist.scatter_(1, targets_valid.unsqueeze(1), 1.0 - self.label_smoothing)
+        
+        log_probs = torch.log_softmax(logits_valid, dim=-1)
+        
+        # CE loss with label smoothing
+        ce_loss = -(true_dist * log_probs).sum(dim=-1)
+        
+        # Focal loss weight
+        probs = torch.softmax(logits_valid, dim=-1)
+        pt = probs.gather(1, targets_valid.unsqueeze(1)).squeeze(1)
+        focal_weight = (1 - pt) ** self.gamma
+        
+        # Class weight (alpha)
+        if self.alpha is not None:
+            alpha_t = self.alpha[targets_valid]
+            loss = alpha_t * focal_weight * ce_loss
+        else:
+            loss = focal_weight * ce_loss
+        
+        return loss.mean()
+
+
+def collate_batch(batch_data, feature_dim, max_seq_len=200):
+    batch_x = []
+    batch_y = []
+    lengths = []
+    
+    for page_features, targets in batch_data:
+        x = torch.tensor(page_features, dtype=torch.float32)
+        y = torch.tensor(targets, dtype=torch.long)
+        batch_x.append(x)
+        batch_y.append(y)
+        lengths.append(len(targets))
+    
+    max_len = min(max(lengths), max_seq_len)
+    padded_x = []
+    padded_y = []
+    masks = []
+    
+    for x, y, length in zip(batch_x, batch_y, lengths):
+        pad_size = max_len - length
+        if pad_size > 0:
+            x_padded = torch.cat([x, torch.zeros(pad_size, feature_dim)], dim=0)
+            y_padded = torch.cat([y, torch.full((pad_size,), -1, dtype=torch.long)])
+            mask = torch.cat([torch.zeros(length, dtype=torch.bool), 
+                            torch.ones(pad_size, dtype=torch.bool)])
+        elif pad_size < 0:
+            x_padded = x[:max_len]
+            y_padded = y[:max_len]
+            mask = torch.zeros(max_len, dtype=torch.bool)
+        else:
+            x_padded = x
+            y_padded = y
+            mask = torch.zeros(length, dtype=torch.bool)
+        
+        padded_x.append(x_padded)
+        padded_y.append(y_padded)
+        masks.append(mask)
+    
+    batch_x = torch.stack(padded_x)  # (batch_size, max_len, feature_dim)
+    batch_y = torch.stack(padded_y)  # (batch_size, max_len)
+    masks = torch.stack(masks)  # (batch_size, max_len)
+    
+    return batch_x, batch_y, masks, lengths
+
+
+def compute_class_weights(pages_targets, num_classes, device):
+    label_counts = torch.zeros(num_classes, dtype=torch.float32)
+    total = 0
+    for labels in pages_targets:
+        for lbl in labels:
+            label_counts[lbl] += 1
+            total += 1
+    
+    class_weights = total / (num_classes * (label_counts + 1e-6))
+    class_weights = class_weights.to(device)
+    
+    print("Label distribution:")
+    for i in range(num_classes):
+        print(f"  Class {i}: {label_counts[i]:.0f} samples ({100*label_counts[i]/total:.2f}%), weight: {class_weights[i]:.4f}")
+    
+    return class_weights
+
+
+def evaluate_model(model, validation_data, feature_dim, device, num_classes, max_len=200):
+    model.eval()
+    all_preds = []
+    all_targets = []
+    
+    with torch.no_grad():
+        for page_features, targets in validation_data:
+            x = torch.tensor(page_features, dtype=torch.float32).to(device)
+            y = torch.tensor(targets, dtype=torch.long)
+            
+
+            if x.shape[0] > max_len:
+                x = x[:max_len, :] 
+
+            x = x.unsqueeze(0)
+            
+            if y.shape[0] > max_len:
+                y = y[:max_len]
+            pred = model(x)
+            _, predicted = torch.max(pred.squeeze(0), dim=1)
+            
+            all_preds.extend(predicted.cpu().tolist())
+            all_targets.extend(y.tolist())
+    
+    correct = sum(p == t for p, t in zip(all_preds, all_targets))
+    accuracy = correct / len(all_targets)
+    
+    class_correct = [0] * num_classes
+    class_total = [0] * num_classes
+    
+    for p, t in zip(all_preds, all_targets):
+        class_total[t] += 1
+        if p == t:
+            class_correct[t] += 1
+    
+    class_acc = [class_correct[i] / (class_total[i] + 1e-6) for i in range(num_classes)]
+    
+    return accuracy, class_acc, all_preds, all_targets
+
+
 if __name__ == "__main__":
     import pickle
     import os
@@ -167,8 +432,9 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int, default=16, help="Batch size for training")
     parser.add_argument('--split', type=str, default="test", help="Dataset split to use (train/val/test)")
     parser.add_argument("--epochs", type=int, default=10, help="Number of training epochs")
-    parser.add_argument("--features_cache", type=str, default=".cache/features_cache_segmented.pkl", help="Path to cache extracted features")
-    parser.add_argument("--data_cache", type=str, default=".cache/data_cache_segmented.pkl", help="Path to cache dataset")
+    parser.add_argument("--features_cache", type=str, default=".cache/features_cache.pkl", help="Path to cache extracted features")
+    parser.add_argument("--pieces", type=int, default=1, help="Number of pieces to split the feature cache into")
+    parser.add_argument("--data_cache", type=str, default=".cache/data_cache.pkl", help="Path to cache dataset")
     parser.add_argument("--train_split", type=float, default=0.8, help="Proportion of data to use for training")
     parser.add_argument("--random_seed", type=int, default=42, help="Random seed for reproducibility")
     parser.add_argument("--hidden_dim", type=int, default=512, help="Hidden dimension size of the Transformer")
@@ -179,25 +445,25 @@ if __name__ == "__main__":
     parser.add_argument("--gamma", type=float, default=2.0, help="Focusing parameter for Focal Loss")
     parser.add_argument("--weight_decay", type=float, default=0.01, help="Weight decay for optimizer")
     parser.add_argument("--model_save_path", type=str, default="best_model.pth", help="Path to save the best model")
+    parser.add_argument("--start_idx", type=int, default=0, help="Starting index for data partitioning")
+    parser.add_argument("--end_idx", type=int, default=None, help="Ending index for data partitioning")
+    parser.add_argument("--feature_split", type=int, default=None, help="Ending index for feature partitioning")
+    parser.add_argument("--max_len", type=int, default=200, help="Maximum sequence length for model input")
     args = parser.parse_args()
 
-
-    torch.manual_seed(42)
-    np.random.seed(42)
+    torch.manual_seed(args.random_seed)
+    np.random.seed(args.random_seed)
     
-    num_classes = 2
-    device = args.device
-    if device == "auto":
-        if torch.cuda.is_available():
-            device = torch.device("cuda")
-        elif torch.backends.mps.is_available():
-            device = torch.device("mps")
-        else:
-            device = torch.device("cpu")
+    num_classes = 11
+    device = torch.device(args.device if args.device != "auto" else
+                          "cuda" if torch.cuda.is_available() else
+                          "mps" if torch.backends.mps.is_available() else
+                          "cpu")
+    print(f"Using device: {device}")
 
     features_cache_file = args.features_cache
-
-    if os.path.exists(features_cache_file):
+    
+    if os.path.exists(features_cache_file) and args.pieces == 1:
         print(f"Found feature cache: {features_cache_file}, Loading cached features...")
         with open(features_cache_file, 'rb') as f:
             cache_data = pickle.load(f)
@@ -205,27 +471,43 @@ if __name__ == "__main__":
             pages_targets = cache_data['pages_targets']
             feature_dim = cache_data['feature_dim']
         print(f"Loaded.")
+    elif args.pieces > 1 and all(os.path.exists(features_cache_file.replace(".pkl", f"_{i}.pkl")) for i in range(args.pieces)):
+        print(f"Found feature cache pieces, Loading cached features...")
+        pages_features = []
+        pages_targets = []
+        for i in range(args.pieces):
+            print(f" Loading piece {i+1}/{args.pieces}...")
+            with open(features_cache_file.replace(".pkl", f"_{i}.pkl"), 'rb') as f:
+                cache_data = pickle.load(f)
+                pages_features.extend(cache_data['pages_features'])
+                pages_targets.extend(cache_data['pages_targets'])
+                feature_dim = cache_data['feature_dim']
+        print(f"Loaded.")
     else:
         print("Loading dataset...")
-        dataset = DocLayNetDataset(split=args.split, rewrite_storage=False)
+        dataset = DocLayNetDataset(split=args.split, rewrite_storage=False, start_idx=args.start_idx, end_idx=args.end_idx)
         if os.path.exists(args.data_cache):
             print("Loading data cache...")
             dataset.load_cache(input_path=args.data_cache)
-        
-        feature_extractor = FeatureExtractorSegment(dataset)
+
+        feature_extractor = FeatureExtractor(dataset)
         if not os.path.exists(args.data_cache):
             dataset.save_cache(output_path=args.data_cache)
         pages_features, pages_targets = feature_extractor.get_page_features()
         feature_dim = len(pages_features[0][0])
-        
         cache_data = {
-            'pages_features': pages_features,
-            'pages_targets': pages_targets,
-            'feature_dim': feature_dim
-        }
-        with open(features_cache_file, 'wb') as f:
-            pickle.dump(cache_data, f)
-    
+        'pages_features': pages_features,
+        'pages_targets': pages_targets,
+        'feature_dim': feature_dim
+    }
+        if args.feature_split is None:
+            with open(features_cache_file, 'wb') as f:
+                pickle.dump(cache_data, f)
+        else:
+            with open(features_cache_file.replace(".pkl", f"_{args.feature_split}.pkl"), 'wb') as f:
+                pickle.dump(cache_data, f)
+    if args.feature_split is not None:
+        exit(0) # Exit after saving feature partitions
     import random
     features_and_targets = list(zip(pages_features, pages_targets))
     random.shuffle(features_and_targets)
@@ -241,7 +523,8 @@ if __name__ == "__main__":
         num_layers=args.num_layers,
         num_heads=args.num_heads,
         output_dim=num_classes,
-        dropout=args.dropout
+        dropout=args.dropout,
+        max_seq_len=args.max_len,
     ).to(device)
 
     optimizer = optim.AdamW(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
@@ -257,7 +540,7 @@ if __name__ == "__main__":
     
     BATCH_SIZE = args.batch_size
     EPOCHS = args.epochs
-
+    
     best_accuracy = 0.0
     losses_history = []
     
@@ -269,7 +552,7 @@ if __name__ == "__main__":
         for i in pbar:
             batch_data = training_data[i:i+BATCH_SIZE]
             
-            x, y, masks, lengths = collate_batch(batch_data, feature_dim)
+            x, y, masks, lengths = collate_batch(batch_data, feature_dim, max_seq_len=args.max_len)
             x, y, masks = x.to(device), y.to(device), masks.to(device)
             
             optimizer.zero_grad()
@@ -292,9 +575,8 @@ if __name__ == "__main__":
                 pbar.set_postfix({'loss': f'{np.mean(epoch_losses[-100:]):.4f}'})
         
         scheduler.step()
-        
         print(f"\nEvaluating epoch {epoch+1}...")
-        accuracy, class_acc, _, _ = evaluate_model(model, validation_data, feature_dim, device, num_classes)
+        accuracy, class_acc, _, _ = evaluate_model(model, validation_data, feature_dim, device, num_classes, max_len=args.max_len)
         
         print(f"Epoch {epoch+1} - Overall Accuracy: {accuracy:.4f}")
         print("Per-class accuracy:")
