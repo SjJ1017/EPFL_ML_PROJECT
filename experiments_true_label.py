@@ -431,28 +431,28 @@ if not skip_train:
         end_idx=TRAIN_SAMPLES,
     )
 
-accuracy, class_acc, all_preds_token, all_targets_token, seg_accuracy, seg_class_accuracy, accuracy_token, class_acc_token = evaluate(
-    split="validation",
-    num_classes=11,
-    random_seed=42,
-    device="cuda",
-    val_type="gold_seg", # or "seg_noisy"
-    validation_cache = '.cache/val.pkl',
-    train_split=0.8,
-    hidden_dim=HIDDEN_DIM,
-    num_layers=NUM_LAYERS,
-    max_len=512,
-    learning_rate=2e-4,
-    gamma=GAMMA,
-    batch_size=16,
-    epochs=EPOCHS,
-    model_save_dir="models",
-    end_idx=VAL_NUM,
-    results_dir ='.results'
-)
-print(f"Validation Accuracy: {accuracy:.4f}")
-print(f"Validation Class Accuracy: {class_acc}")
-print(f"Segmentation Accuracy: {seg_accuracy:.4f}")
-print(f"Segmentation Class Correct: {seg_class_accuracy}")
-print(f"Token Accuracy: {accuracy_token:.4f}")
-print(f"Token Class Accuracy: {class_acc_token}")
+    accuracy, class_acc, all_preds_token, all_targets_token, seg_accuracy, seg_class_accuracy, accuracy_token, class_acc_token = evaluate(
+        split="validation",
+        num_classes=11,
+        random_seed=42,
+        device="cuda",
+        val_type="gold_seg", # or "seg_noisy"
+        validation_cache = '.cache/val.pkl',
+        train_split=0.8,
+        hidden_dim=HIDDEN_DIM,
+        num_layers=NUM_LAYERS,
+        max_len=512,
+        learning_rate=2e-4,
+        gamma=GAMMA,
+        batch_size=16,
+        epochs=EPOCHS,
+        model_save_dir="models",
+        end_idx=VAL_NUM,
+        results_dir ='.results'
+    )
+    print(f"Validation Accuracy: {accuracy:.4f}")
+    print(f"Validation Class Accuracy: {class_acc}")
+    print(f"Segmentation Accuracy: {seg_accuracy:.4f}")
+    print(f"Segmentation Class Correct: {seg_class_accuracy}")
+    print(f"Token Accuracy: {accuracy_token:.4f}")
+    print(f"Token Class Accuracy: {class_acc_token}")
