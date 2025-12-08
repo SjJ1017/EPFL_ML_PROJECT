@@ -248,7 +248,7 @@ def _evaluate_model(model, segment_model, validation_data, device, num_classes, 
     all_preds_token_next = all_preds_token[1:] + [0.0]
     each_len = [min(len(p), max_len) for p, _,_ in validation_data]
     assert sum(each_len) == len(all_preds_token), "Length mismatch in predictions."
-    pages_features_stacked = np.vstack([p for p, _,_ in validation_data])
+    pages_features_stacked = np.vstack([p[:max_len] for p, _,_ in validation_data])
     pages_features_stacked = insert_columns(pages_features_stacked, [all_preds_token, all_preds_token_prev, all_preds_token_next], ks=indices)
     # print(pages_features_stacked.shape)
     pages_features = []
@@ -387,44 +387,49 @@ VAL_NUM = args.val_num
 
 # First, train the token_type model
 
-train(
-    split="test",
-    num_classes=11,
-    random_seed=42,
-    device="cuda",
-    train_type="token",
-    cache_dir=".cache",
-    train_split=0.8,
-    hidden_dim=HIDDEN_DIM,
-    num_layers=NUM_LAYERS,
-    max_len=512,
-    learning_rate=2e-4,
-    gamma=GAMMA,
-    batch_size=16,
-    epochs=EPOCHS,
-    model_save_dir="models",
-    end_idx=TRAIN_SAMPLES,
-)
+if NUM_LAYERS == 6 and HIDDEN_DIM == 512 and GAMMA == 2.0 and EPOCHS ==30:
+    skip_train = True
+    print("Skipping token_type model training as this configuration is already trained.")
 
-# Then, train the segmenting model
-train(
-    split="test",
-    num_classes=2,
-    random_seed=42,
-    device="cuda",
-    train_type="gold_seg", # or "seg_noisy"
-    cache_dir=".cache",
-    train_split=0.8,
-    hidden_dim=HIDDEN_DIM,
-    num_layers=NUM_LAYERS,
-    max_len=512,
-    learning_rate=2e-4,
-    gamma=GAMMA,
-    batch_size=16,
-    epochs=EPOCHS,
-    model_save_dir="models",
-    end_idx=TRAIN_SAMPLES,
-)
+if not skip_train:
+    train(
+        split="test",
+        num_classes=11,
+        random_seed=42,
+        device="cuda",
+        train_type="token",
+        cache_dir=".cache",
+        train_split=0.8,
+        hidden_dim=HIDDEN_DIM,
+        num_layers=NUM_LAYERS,
+        max_len=512,
+        learning_rate=2e-4,
+        gamma=GAMMA,
+        batch_size=16,
+        epochs=EPOCHS,
+        model_save_dir="models",
+        end_idx=TRAIN_SAMPLES,
+    )
+
+    # Then, train the segmenting model
+    train(
+        split="test",
+        num_classes=2,
+        random_seed=42,
+        device="cuda",
+        train_type="gold_seg", # or "seg_noisy"
+        cache_dir=".cache",
+        train_split=0.8,
+        hidden_dim=HIDDEN_DIM,
+        num_layers=NUM_LAYERS,
+        max_len=512,
+        learning_rate=2e-4,
+        gamma=GAMMA,
+        batch_size=16,
+        epochs=EPOCHS,
+        model_save_dir="models",
+        end_idx=TRAIN_SAMPLES,
+    )
 
 accuracy, class_acc, all_preds_token, all_targets_token, seg_accuracy, seg_class_accuracy, accuracy_token, class_acc_token = evaluate(
     split="validation",
