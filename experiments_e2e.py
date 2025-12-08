@@ -153,7 +153,7 @@ def aggregating_tokens(tokens, segs):
         tokens[starting_index:len(tokens)] = [majority_token] * (len(tokens) - starting_index)
     return tokens, segs
 
-def evaluate_model(model, segment_model, validation_data, device, num_classes, max_len=512, extractor=None):
+def _evaluate_model(model, segment_model, validation_data, device, num_classes, max_len=512, extractor=None):
     model.eval()
     all_preds_token = []
     all_preds_seg = []
@@ -258,7 +258,7 @@ def evaluate(split = 'validation', num_classes = 11, val_type = 'e2e', random_se
 
     model.load_state_dict(torch.load(f"{model_save_dir}/H{hidden_dim}_L{num_layers}_G{str(gamma).replace('.', '')}/model_e2e_epoch{epochs}.pth", map_location=device))
 
-    accuracy, class_acc, all_preds_token, all_targets_token, seg_accuracy, seg_class_accuracy = evaluate_model(model, None, validation_data, device, num_classes, max_len=max_len, extractor=extractor)
+    accuracy, class_acc, all_preds_token, all_targets_token, seg_accuracy, seg_class_accuracy = _evaluate_model(model, None, validation_data, device, num_classes, max_len=max_len, extractor=extractor)
 
     if results_dir:
         os.makedirs(results_dir, exist_ok=True)
