@@ -12,13 +12,17 @@ import torch.optim as optim
 from collections import Counter
 from time import time
 
-class FeatureExtractor:
+class FeatureExtractor: 
 
-    def __init__(self, dataset: DocLayNetDataset | list[PdfFeatures]):
+    CLASS_NUM = len(TokenType)
+
+    def __init__(self, dataset: DocLayNetDataset | list[PdfFeatures], context = True, include_segmentation: bool = False):
         self.dataset = dataset if isinstance(dataset, DocLayNetDataset) else None
         self.pdfs_features = dataset if isinstance(dataset, list) and all(isinstance(pdf, PdfFeatures) for pdf in dataset) else None
         self.font_stats = None
-        
+        self.context = context
+        self.include_segmentation = include_segmentation
+
     def extract_statistical_features(self, token, page, prev_token=None, next_token=None):
 
         features = []
@@ -76,8 +80,8 @@ class FeatureExtractor:
             1.0 if bottom_norm > 0.9 else 0.0,  
             1.0 if 0.4 < left_norm + width_norm / 2 < 0.6 else 0.0, 
         ])
-        
-        if prev_token:
+
+        if prev_token and self.context:
             prev_box = prev_token.bounding_box
 
             horizontal_dist = (box.left - prev_box.right) / page_width
@@ -94,7 +98,7 @@ class FeatureExtractor:
         else:
             features.extend([0.0, 0.0, 0.0, 0.0])
         
-        if next_token:
+        if next_token and self.context:
             next_box = next_token.bounding_box
             horizontal_dist = (next_box.left - box.right) / page_width
             vertical_dist = (box.top - next_box.top) / page_height
@@ -132,7 +136,13 @@ class FeatureExtractor:
                 )
                 
                 feature_rows.append(features)
-                targets.append(token.token_type.get_index())
+                if self.include_segmentation:
+                    if token.prediction:
+                        targets.append(token.token_type.get_index())
+                    else:
+                        targets.append(FeatureExtractor.CLASS_NUM) # another class, meaning following the prev token's segmentation
+                else:
+                    targets.append(token.token_type.get_index())
             
             pages_features.append(feature_rows)
             page_targets.append(targets)
@@ -267,13 +277,44 @@ class TransformerTagger(nn.Module, FeatureExtractor):
     
     def labeled_features(self):
         if self.pdfs_features is None:
-            raise ValueError("Feature extractor not loaded with PdfFeatures but with DocLayNetDataset. This method is only for PdfFeatures.")
+            if self.doc_dataset is None:
+                raise ValueError("Feature extractor not loaded with PdfFeatures but with DocLayNetDataset. This method is only for PdfFeatures.")
+            else:
+                raise ValueError("Errror: empty pdfs_features")
         labels = self.predict()
         assert len(labels) == sum(len(page.tokens) for pdf in self.pdfs_features for page in pdf.pages)
         for pdf in self.pdfs_features:
             for page in pdf.pages:
                 for token in page.tokens:
                     token.token_type = TokenType.from_index(labels.pop(0))
+        return self.pdfs_features
+
+class TransformerTaggerE2e(TransformerTagger):
+    def labeled_features(self):
+        if self.pdfs_features is None:
+            if self.doc_dataset is None:
+                raise ValueError("Feature extractor not loaded with PdfFeatures but with DocLayNetDataset. This method is only for PdfFeatures.")
+            else:
+                raise ValueError("Errror: empty pdfs_features")
+        labels = self.predict()
+        # labels: %CLASS_NUM * prediction + token_type
+        segmenting_idx = FeatureExtractor.CLASS_NUM
+        predictions = [1 if lbl < segmenting_idx else 0 for i, lbl in enumerate(labels)]
+        # token_types following the last segmenting marker
+        token_types = [lbl if lbl < segmenting_idx else None for i, lbl in enumerate(labels)]
+        # fill the None token_types with the fisrt next segmenting marker
+        for i, token in enumerate(token_types[::-1]):
+            if token is None:
+                if i == 0:
+                    token_types[len(token_types)-1] = 6
+                token_types[len(token_types)-1 - i] = token_types[len(token_types)-i]  # next token_type
+
+        assert len(labels) == sum(len(page.tokens) for pdf in self.pdfs_features for page in pdf.pages)
+        for pdf in self.pdfs_features:
+            for page in pdf.pages:
+                for token in page.tokens:
+                    token.token_type = TokenType.from_index(token_types.pop(0))
+                    token.prediction = predictions.pop(0)
         return self.pdfs_features
 
 class CombinedLoss(nn.Module):
@@ -450,6 +491,8 @@ if __name__ == "__main__":
     parser.add_argument("--start_idx", type=int, default=0, help="Starting index for data partitioning")
     parser.add_argument("--end_idx", type=int, default=None, help="Ending index for data partitioning")
     parser.add_argument("--feature_split", type=int, default=None, help="Ending index for feature partitioning")
+    parser.add_argument("--segment", type=bool, action="store_true", help="Whether to include segmentation features")
+    parser.add_argument("--context", type=bool, action="store_false", help="Whether to include context features")
     parser.add_argument("--max_len", type=int, default=512, help="Maximum sequence length for model input")
     args = parser.parse_args()
 
@@ -462,6 +505,8 @@ if __name__ == "__main__":
                           "mps" if torch.backends.mps.is_available() else
                           "cpu")
     print(f"Using device: {device}")
+
+    print(f"Feature segmentation included: {args.segment}, context included: {args.context}")
 
     features_cache_file = args.features_cache
     

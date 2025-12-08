@@ -130,6 +130,7 @@ def main():
     print(f"Using device: {device}")
     
     pdf_features = ModifiedPdfFeatures.from_pdf_path(args.pdf)
+    # print(pdf_features.pages[0].tokens[-1])
     for page in pdf_features.pages:
         page.tokens = page.tokens[:512]  # Limit to first 512 tokens per page for memory efficiency
     
