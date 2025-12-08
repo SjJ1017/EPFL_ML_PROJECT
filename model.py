@@ -80,8 +80,8 @@ class FeatureExtractor:
             1.0 if bottom_norm > 0.9 else 0.0,  
             1.0 if 0.4 < left_norm + width_norm / 2 < 0.6 else 0.0, 
         ])
-        
-        if prev_token:
+
+        if prev_token and self.context:
             prev_box = prev_token.bounding_box
 
             horizontal_dist = (box.left - prev_box.right) / page_width
@@ -98,7 +98,7 @@ class FeatureExtractor:
         else:
             features.extend([0.0, 0.0, 0.0, 0.0])
         
-        if next_token:
+        if next_token and self.context:
             next_box = next_token.bounding_box
             horizontal_dist = (next_box.left - box.right) / page_width
             vertical_dist = (box.top - next_box.top) / page_height
@@ -128,8 +128,8 @@ class FeatureExtractor:
             feature_rows = []
             
             for i, token in enumerate(tokens):
-                prev_token = tokens[i-1] if (i > 0 and self.context) else None
-                next_token = tokens[i+1] if (i < len(tokens) - 1 and self.context) else None
+                prev_token = tokens[i-1] if i > 0 else None
+                next_token = tokens[i+1] if i < len(tokens) - 1 else None
                 
                 features = self.extract_statistical_features(
                     token, page, prev_token, next_token
@@ -137,7 +137,10 @@ class FeatureExtractor:
                 
                 feature_rows.append(features)
                 if self.include_segmentation:
-                    targets.append(token.token_type.get_index()+int(token.prediction) * FeatureExtractor.CLASS_NUM) # add prediction offset
+                    if token.prediction:
+                        targets.append(token.token_type.get_index())
+                    else:
+                        targets.append(FeatureExtractor.CLASS_NUM) # another class, meaning following the prev token's segmentation
                 else:
                     targets.append(token.token_type.get_index())
             
@@ -295,8 +298,16 @@ class TransformerTaggerE2e(TransformerTagger):
                 raise ValueError("Errror: empty pdfs_features")
         labels = self.predict()
         # labels: %CLASS_NUM * prediction + token_type
-        token_types = [TokenType.from_index(label % TokenType.NUM_CLASSES) for label in labels]
-        predictions = [label // TokenType.NUM_CLASSES for label in labels]
+        segmenting_idx = FeatureExtractor.CLASS_NUM
+        predictions = [1 if lbl < segmenting_idx else 0 for i, lbl in enumerate(labels)]
+        # token_types following the last segmenting marker
+        token_types = [lbl if lbl < segmenting_idx else None for i, lbl in enumerate(labels)]
+        # fill the None token_types with the fisrt next segmenting marker
+        for i, token in enumerate(token_types[::-1]):
+            if token is None:
+                if i == 0:
+                    token_types[len(token_types)-1] = 6
+                token_types[len(token_types)-1 - i] = token_types[len(token_types)-i]  # next token_type
 
         assert len(labels) == sum(len(page.tokens) for pdf in self.pdfs_features for page in pdf.pages)
         for pdf in self.pdfs_features:
