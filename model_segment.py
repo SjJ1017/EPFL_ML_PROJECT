@@ -146,7 +146,10 @@ class TransformerTaggerSegment(TransformerTagger, FeatureExtractorSegment):
 
     def labeled_features(self):
         if self.pdfs_features is None:
-            raise ValueError("Feature extractor not loaded with PdfFeatures but with DocLayNetDataset. This method is only for PdfFeatures.")
+            if self.doc_dataset is None:
+                raise ValueError("Feature extractor not loaded with PdfFeatures but with DocLayNetDataset. This method is only for PdfFeatures.")
+            else:
+                raise ValueError("Errror: empty pdfs_features")
         labels = self.predict()
         assert len(labels) == sum(len(page.tokens) for pdf in self.pdfs_features for page in pdf.pages)
         for pdf in self.pdfs_features:
