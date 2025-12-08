@@ -13,14 +13,40 @@ from time import time
 from model import *
 
 class FeatureExtractorSegment(FeatureExtractor):
+    
+    def identify_adding_positions(self):
+        pages_features = []
+        page_targets = []
+        for page in self.loop_token_features():
+            tokens = page.tokens
+            if len(tokens) == 0:
+                continue
+                
+            targets = []
+            feature_rows = []
+            
+            for i, token in enumerate(tokens):
+                prev_token = tokens[i-1] if i > 0 else None
+                next_token = tokens[i+1] if i < len(tokens) - 1 else None
+                if prev_token and next_token:
+                    token.token_type = None
+                    prev_token.token_type = None
+                    next_token.token_type = None
+                    features = self.extract_statistical_features(
+                        token, page, prev_token, next_token
+                    )
+                    indices = [idx for idx, f in enumerate(features) if f is None]
+                    return indices, len(features)
+
         
+        return pages_features, page_targets
     def extract_statistical_features(self, token, page, prev_token=None, next_token=None):
 
         features = []
         
         content = token.content
         features.extend([
-            token.token_type.get_index(),
+            token.token_type.get_index() if token.token_type else None,
             len(content),  
             len(content.split()),  
             sum(1 for c in content if c.isupper()) / (len(content) + 1e-6), 
@@ -82,7 +108,7 @@ class FeatureExtractorSegment(FeatureExtractor):
             font_size_diff = font_size - float(prev_token.font.font_size)
             
             features.extend([
-                prev_token.token_type.get_index(),
+                prev_token.token_type.get_index() if (prev_token and prev_token.token_type) else None,
                 horizontal_dist,
                 vertical_dist,
                 same_line,
@@ -99,7 +125,7 @@ class FeatureExtractorSegment(FeatureExtractor):
             font_size_diff = float(next_token.font.font_size) - font_size
             
             features.extend([
-                next_token.token_type.get_index(),
+                next_token.token_type.get_index() if (next_token and next_token.token_type) else None,
                 horizontal_dist,
                 vertical_dist,
                 same_line,
@@ -110,6 +136,34 @@ class FeatureExtractorSegment(FeatureExtractor):
         
         return features
     
+    def get_additional_features(self):
+        pages_features = []
+        page_targets = []
+        for page in self.loop_token_features():
+            tokens = page.tokens
+            if len(tokens) == 0:
+                continue
+                
+            targets = []
+            feature_rows = []
+            
+            for i, token in enumerate(tokens):
+                prev_token = tokens[i-1] if i > 0 else None
+                next_token = tokens[i+1] if i < len(tokens) - 1 else None
+                
+                features = self.extract_statistical_features(
+                    token, page, prev_token, next_token
+                )
+                prev_ = prev_token.token_type.get_index() if prev_token and prev_token.token_type else 0
+                next_ = next_token.token_type.get_index() if next_token and next_token.token_type else 0
+                feature_rows.append([token.token_type.get_index() if token.token_type else 0] + features + [prev_, next_])
+                targets.append(token.prediction)
+            
+            pages_features.append(feature_rows)
+            page_targets.append(targets)
+        
+        return pages_features, page_targets
+
     def get_page_features(self):
         pages_features = []
         page_targets = []
