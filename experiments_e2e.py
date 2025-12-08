@@ -296,7 +296,7 @@ train(
     split="test",
     num_classes=12,
     random_seed=42,
-    device="mps",
+    device="cuda" if torch.cuda.is_available() else "cpu",
     train_type="e2e",
     cache_dir=".cache",
     train_split=0.8,
@@ -315,7 +315,7 @@ accuracy, class_acc, all_preds_token, all_targets_token, seg_accuracy, seg_class
     split="validation",
     num_classes=12,
     random_seed=42,
-    device="cpu",
+    device="cuda" if torch.cuda.is_available() else "cpu",
     val_type="e2e", # or "seg_noisy"
     validation_cache = '.cache/val_e2e.pkl',
     train_split=0.8,
