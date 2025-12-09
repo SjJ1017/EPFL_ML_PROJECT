@@ -80,39 +80,39 @@ class FeatureExtractor:
             1.0 if bottom_norm > 0.9 else 0.0,  
             1.0 if 0.4 < left_norm + width_norm / 2 < 0.6 else 0.0, 
         ])
+        if self.context:
+            if prev_token:
+                prev_box = prev_token.bounding_box
 
-        if prev_token and self.context:
-            prev_box = prev_token.bounding_box
+                horizontal_dist = (box.left - prev_box.right) / page_width
+                vertical_dist = (prev_box.top - box.top) / page_height
+                same_line = 1.0 if abs(vertical_dist) < 0.01 else 0.0
+                font_size_diff = font_size - float(prev_token.font.font_size)
+                
+                features.extend([
+                    horizontal_dist,
+                    vertical_dist,
+                    same_line,
+                    font_size_diff,
+                ])
+            else:
+                features.extend([0.0, 0.0, 0.0, 0.0])
 
-            horizontal_dist = (box.left - prev_box.right) / page_width
-            vertical_dist = (prev_box.top - box.top) / page_height
-            same_line = 1.0 if abs(vertical_dist) < 0.01 else 0.0
-            font_size_diff = font_size - float(prev_token.font.font_size)
-            
-            features.extend([
-                horizontal_dist,
-                vertical_dist,
-                same_line,
-                font_size_diff,
-            ])
-        else:
-            features.extend([0.0, 0.0, 0.0, 0.0])
-        
-        if next_token and self.context:
-            next_box = next_token.bounding_box
-            horizontal_dist = (next_box.left - box.right) / page_width
-            vertical_dist = (box.top - next_box.top) / page_height
-            same_line = 1.0 if abs(vertical_dist) < 0.01 else 0.0
-            font_size_diff = float(next_token.font.font_size) - font_size
-            
-            features.extend([
-                horizontal_dist,
-                vertical_dist,
-                same_line,
-                font_size_diff,
-            ])
-        else:
-            features.extend([0.0, 0.0, 0.0, 0.0])
+            if next_token:
+                next_box = next_token.bounding_box
+                horizontal_dist = (next_box.left - box.right) / page_width
+                vertical_dist = (box.top - next_box.top) / page_height
+                same_line = 1.0 if abs(vertical_dist) < 0.01 else 0.0
+                font_size_diff = float(next_token.font.font_size) - font_size
+                
+                features.extend([
+                    horizontal_dist,
+                    vertical_dist,
+                    same_line,
+                    font_size_diff,
+                ])
+            else:
+                features.extend([0.0, 0.0, 0.0, 0.0])
         
         return features
     
