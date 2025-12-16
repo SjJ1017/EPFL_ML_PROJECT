@@ -6,7 +6,7 @@ from pdf_features.PdfFeatures import PdfFeatures
 # pdf-labeled-data/labeled_data/token_type/test_data
 import os
 from tqdm import tqdm
-all_files = os.listdir("../ml/pdf-labeled-data/labeled_data/token_type/test_data")
+all_files = os.listdir("../ml/pdf-labeled-data/labeled_data/token_type/test_data")[:500]
 pdfs_features = []
 for file in tqdm(all_files):
     pdf_feature = PdfFeatures.from_labeled_data("../ml/pdf-labeled-data", "test_data", file)
@@ -28,11 +28,11 @@ from src.adapters.ml.pdf_tokens_type_trainer.TokenTypeTrainer import TokenTypeTr
 
 def train_token_type_model():
     model_configuration = ModelConfiguration()
-    labeled_pdf_features_list: list[PdfFeatures] = pdfs_features
+    labeled_pdf_features_list: list[PdfFeatures] = pdfs_features[:500]
     trainer = TokenTypeTrainer(labeled_pdf_features_list, model_configuration)
     train_labels = [token.token_type.get_index() for token in trainer.loop_tokens()]
     start_time = time.time()
-    trainer.train("models/token_type_example_model_.model", train_labels)    
+    trainer.train("models/token_type_example_model__.model", train_labels)    
     end_time = time.time()
     print(f"Training time: {end_time - start_time} seconds")
 train_token_type_model()
