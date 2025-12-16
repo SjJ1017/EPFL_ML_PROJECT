@@ -46,14 +46,7 @@ def train(split = 'test', num_classes = 11, train_type = 'token', random_seed=42
         if not os.path.exists(cache_path):
             dataset.save_cache(output_path=cache_path)
         pages_features, pages_targets = feature_extractor.get_page_features()
-        if delete_range is not None:
-            if train_type == 'token':
-                print(f"Deleting columns in range: {delete_range}")
-                pages_features = [np.delete(p, np.s_[delete_range[0]:delete_range[1]], axis=1) for p in pages_features]
-            elif train_type in ['gold_seg', 'noisy_seg']:
-                print(f"Deleting columns in range: {delete_range}")
-                pages_features = [np.delete(p, np.s_[delete_range[0] + 1:delete_range[1] + 1], axis=1) for p in pages_features]
-        feature_dim = len(pages_features[0][0])
+
         cache_data = {
         'pages_features': pages_features,
         'pages_targets': pages_targets,
@@ -62,7 +55,16 @@ def train(split = 'test', num_classes = 11, train_type = 'token', random_seed=42
     with open(feature_path, 'wb') as f:
         pickle.dump(cache_data, f)
 
+    if delete_range is not None:
+        if train_type == 'token':
+            print(f"Deleting columns in range: {delete_range}")
+            pages_features = [np.delete(p, np.s_[delete_range[0]:delete_range[1]], axis=1) for p in pages_features]
+        elif train_type in ['gold_seg', 'noisy_seg']:
+            print(f"Deleting columns in range: {delete_range}")
+            pages_features = [np.delete(p, np.s_[delete_range[0] + 1:delete_range[1] + 1], axis=1) for p in pages_features]
     pages_features = [p[:max_len] for p in pages_features]
+    feature_dim = len(pages_features[0][0])
+    print(f"Feature dimension: {feature_dim}")
     if train_type == 'noisy_seg':
         print("Replacing with predictions")
         token_type_model = TransformerTagger(
@@ -331,7 +333,15 @@ def evaluate(split = 'validation', num_classes = 11, val_type = 'token', random_
         pages_targets_token = saving['pages_targets_token']
         pages_features_seg = saving['pages_features_seg']
         pages_targets_seg = saving['pages_targets_seg']
-        
+
+    if delete_range is not None:
+        pages_features = [np.delete(p, np.s_[delete_range[0]:delete_range[1]], axis=1) for p in pages_features]
+        pages_features_seg = [np.delete(p, np.s_[delete_range[0] + 1:delete_range[1] + 1], axis=1) for p in pages_features_seg]
+    feature_dim = len(pages_features[0][0])
+    print(f"Feature dimension: {feature_dim}")
+    feature_dim_seg = len(pages_features_seg[0][0])
+    print(f"Feature dimension segment: {feature_dim_seg}")
+    
     validation_data = list(zip(pages_features, pages_targets_token, pages_targets_seg))
     model = TransformerTagger(
         input_dim=len(pages_features[0][0]),
