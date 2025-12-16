@@ -396,7 +396,7 @@ TRAIN_SAMPLES = args.train_samples
 VAL_NUM = args.val_num
 
 # First, train the token_type model
-skip_train = False
+skip_train = args.skip_train
 if NUM_LAYERS == 6 and HIDDEN_DIM == 512 and GAMMA == 2.0 and EPOCHS ==30:
     skip_train = True
     print("Skipping token_type model training as this configuration is already trained.")
