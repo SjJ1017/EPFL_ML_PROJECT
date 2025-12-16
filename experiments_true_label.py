@@ -35,6 +35,15 @@ def train(split = 'test', num_classes = 11, train_type = 'token', random_seed=42
             pages_features = cache_data['pages_features']
             pages_targets = cache_data['pages_targets']
             feature_dim = cache_data['feature_dim']
+        if delete_range is not None:
+            if train_type == 'token':
+                print(f"Deleting columns in range: {delete_range}")
+                pages_features = [np.delete(p, np.s_[delete_range[0]:delete_range[1]], axis=1) for p in pages_features]
+            elif train_type in ['gold_seg', 'noisy_seg']:
+                print(f"Deleting columns in range: {delete_range}")
+                pages_features = [np.delete(p, np.s_[delete_range[0] + 1:delete_range[1] + 1], axis=1) for p in pages_features]
+            feature_dim = len(pages_features[0][0])
+            print(f"New feature dimension after deletion: {feature_dim}")
         print(f"Loaded.")
     else:
 
@@ -46,22 +55,18 @@ def train(split = 'test', num_classes = 11, train_type = 'token', random_seed=42
         if not os.path.exists(cache_path):
             dataset.save_cache(output_path=cache_path)
         pages_features, pages_targets = feature_extractor.get_page_features()
-
+        feature_dim = len(pages_features[0][0])
         cache_data = {
         'pages_features': pages_features,
         'pages_targets': pages_targets,
         'feature_dim': feature_dim
     }
-    with open(feature_path, 'wb') as f:
-        pickle.dump(cache_data, f)
+        print('feature_dim:', feature_dim)
+        with open(feature_path, 'wb') as f:
+            pickle.dump(cache_data, f)
+        raise NotImplementedError("Feature saved. Please rerun the training.")
 
-    if delete_range is not None:
-        if train_type == 'token':
-            print(f"Deleting columns in range: {delete_range}")
-            pages_features = [np.delete(p, np.s_[delete_range[0]:delete_range[1]], axis=1) for p in pages_features]
-        elif train_type in ['gold_seg', 'noisy_seg']:
-            print(f"Deleting columns in range: {delete_range}")
-            pages_features = [np.delete(p, np.s_[delete_range[0] + 1:delete_range[1] + 1], axis=1) for p in pages_features]
+
     pages_features = [p[:max_len] for p in pages_features]
     feature_dim = len(pages_features[0][0])
     print(f"Feature dimension: {feature_dim}")
