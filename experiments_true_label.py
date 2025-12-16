@@ -16,7 +16,7 @@ from utils import *
 
 
 
-def train(split = 'test', num_classes = 11, train_type = 'token', random_seed=42, device ='cuda', cache_dir='.cache', data_cache='data_cache.pkl', train_split=0.8, hidden_dim=512, num_layers=6, num_heads = 8, max_len=512, dropout = 0.2, weight_decay =0.01, learning_rate=2e-4, gamma=2.0, batch_size=16, epochs=30, model_save_dir='models', end_idx = 10):
+def train(split = 'test', num_classes = 11, train_type = 'token', random_seed=42, device ='cuda', cache_dir='.cache', data_cache='data_cache.pkl', train_split=0.8, hidden_dim=512, num_layers=6, num_heads = 8, max_len=512, dropout = 0.2, weight_decay =0.01, learning_rate=2e-4, gamma=2.0, batch_size=16, epochs=30, model_save_dir='models', end_idx = 10, delete_range = None):
     torch.manual_seed(random_seed)
     np.random.seed(random_seed)
 
@@ -46,6 +46,13 @@ def train(split = 'test', num_classes = 11, train_type = 'token', random_seed=42
         if not os.path.exists(cache_path):
             dataset.save_cache(output_path=cache_path)
         pages_features, pages_targets = feature_extractor.get_page_features()
+        if delete_range is not None:
+            if train_type == 'token':
+                print(f"Deleting columns in range: {delete_range}")
+                pages_features = [np.delete(p, np.s_[delete_range[0]:delete_range[1]], axis=1) for p in pages_features]
+            elif train_type in ['gold_seg', 'noisy_seg']:
+                print(f"Deleting columns in range: {delete_range}")
+                pages_features = [np.delete(p, np.s_[delete_range[0] + 1:delete_range[1] + 1], axis=1) for p in pages_features]
         feature_dim = len(pages_features[0][0])
         cache_data = {
         'pages_features': pages_features,
@@ -374,6 +381,8 @@ parser.add_argument("--gamma", type=float, default=2.0, help="Gamma value for fo
 parser.add_argument("--epochs", type=int, default=30, help="Number of training epochs")
 parser.add_argument("--train_samples", type=int, default=None, help="Number of training samples (None for full set)")
 parser.add_argument("--val_num", type=int, default=2000, help="Number of validation samples")
+parser.add_argument("--range_min", type=int, default=0, help="Minimum range for deletion")
+parser.add_argument("--range_max", type=int, default=0, help="Maximum range for deletion")
 args = parser.parse_args()
 
 # PARAMETERS
@@ -391,6 +400,10 @@ if NUM_LAYERS == 6 and HIDDEN_DIM == 512 and GAMMA == 2.0 and EPOCHS ==30:
     skip_train = True
     print("Skipping token_type model training as this configuration is already trained.")
 
+delete_range = None
+if args.range_max > args.range_min:
+    delete_range = (args.range_min, args.range_max)
+    print(f"Columns to be deleted: {delete_range}")
 if not skip_train:
     train(
         split="test",
@@ -409,6 +422,7 @@ if not skip_train:
         epochs=EPOCHS,
         model_save_dir="models",
         end_idx=TRAIN_SAMPLES,
+        delete_range=delete_range
     )
 
     # Then, train the segmenting model
@@ -429,6 +443,7 @@ if not skip_train:
         epochs=EPOCHS,
         model_save_dir="models",
         end_idx=TRAIN_SAMPLES,
+        delete_range=delete_range
     )
 
     accuracy, class_acc, all_preds_token, all_targets_token, seg_accuracy, seg_class_accuracy, accuracy_token, class_acc_token = evaluate(
