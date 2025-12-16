@@ -9,7 +9,7 @@ from tqdm import tqdm
 all_files = os.listdir("pdf-labeled-data/labeled_data/token_type/test_data")
 pdfs_features = []
 for file in tqdm(all_files):
-    pdf_feature = PdfFeatures.from_labeled_data("pdf-labeled-data", "test_data", file)
+    pdf_feature = PdfFeatures.from_labeled_data("../ml/pdf-labeled-data", "test_data", file)
     pdfs_features.append(pdf_feature)
 
 
