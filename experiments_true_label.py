@@ -383,6 +383,7 @@ parser.add_argument("--train_samples", type=int, default=None, help="Number of t
 parser.add_argument("--val_num", type=int, default=2000, help="Number of validation samples")
 parser.add_argument("--range_min", type=int, default=0, help="Minimum range for deletion")
 parser.add_argument("--range_max", type=int, default=0, help="Maximum range for deletion")
+parser.add_argument("--skip_train", action='store_true', help="Skip training if set")
 args = parser.parse_args()
 
 # PARAMETERS
