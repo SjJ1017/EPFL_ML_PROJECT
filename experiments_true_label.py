@@ -65,6 +65,7 @@ def train(split = 'test', num_classes = 11, train_type = 'token', random_seed=42
     pages_features = [p[:max_len] for p in pages_features]
     feature_dim = len(pages_features[0][0])
     print(f"Feature dimension: {feature_dim}")
+    print(pages_features[0][0])
     if train_type == 'noisy_seg':
         print("Replacing with predictions")
         token_type_model = TransformerTagger(
@@ -407,10 +408,6 @@ VAL_NUM = args.val_num
 
 # First, train the token_type model
 skip_train = args.skip_train
-if NUM_LAYERS == 6 and HIDDEN_DIM == 512 and GAMMA == 2.0 and EPOCHS ==30:
-    skip_train = True
-    print("Skipping token_type model training as this configuration is already trained.")
-
 delete_range = None
 if args.range_max > args.range_min:
     delete_range = (args.range_min, args.range_max)
