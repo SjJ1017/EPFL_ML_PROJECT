@@ -6,7 +6,7 @@ from pdf_features.PdfFeatures import PdfFeatures
 # pdf-labeled-data/labeled_data/token_type/test_data
 import os
 from tqdm import tqdm
-all_files = os.listdir("pdf-labeled-data/labeled_data/token_type/test_data")
+all_files = os.listdir("../ml/pdf-labeled-data/labeled_data/token_type/test_data")
 pdfs_features = []
 for file in tqdm(all_files):
     pdf_feature = PdfFeatures.from_labeled_data("../ml/pdf-labeled-data", "test_data", file)
