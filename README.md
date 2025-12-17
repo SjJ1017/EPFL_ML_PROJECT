@@ -64,7 +64,7 @@ pdf-features  # Installed via git
 ```
 
 ### Pretrained Models
-To run some of the experiments, you can use the pre-trained models in the `model branch`
+To run some of the experiments, you can use the pre-trained models in the `model` branch.
 
 [Download pretrained model](https://github.com/SjJ1017/EPFL_ML_PROJECT/tree/models/models)
 - `best_larger_train_deep.pth` and `best_segment_model.pth` are the pre-trained Transformer Models. You can use them for prediction on real PDFs using `predict_and_visualize.py`
