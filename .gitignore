@@ -7,7 +7,6 @@ test_pdfs/
 
 
 # data and cache
-models/
 models_backup/
 .cache/
 test_pdf_labeled
