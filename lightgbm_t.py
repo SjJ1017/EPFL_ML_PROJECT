@@ -46,9 +46,9 @@ def train_segmenter():
     dataset = DocLayNetDatasetSegmented(split='test')
 
     pdfs_features = []
-    for i in range(len(dataset)):
+    for i in tqdm(range(len(dataset))):
         pdfs_features.append(dataset[i])
-
+    dataset.save_cache("data_cache_segmenter.pkl")
     print([tok.prediction for tok in pdfs_features[0].pages[0].tokens])
 
     features_path = os.path.join(os.getcwd(), "features")
