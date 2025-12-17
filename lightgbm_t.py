@@ -49,10 +49,10 @@ def train_segmenter():
     #for i in tqdm(range(len(dataset))):
     #    pdfs_features.append(dataset[i])
     dataset.load_cache("data_cache_segmenter.pkl")
-    print([tok.prediction for tok in pdfs_features[0].pages[0].tokens])
+
     for i in tqdm(range(len(dataset))):
         pdfs_features.append(dataset[i])
-        
+    print([tok.prediction for tok in pdfs_features[0].pages[0].tokens])
     features_path = os.path.join(os.getcwd(), "features")
     src_path = os.path.join(os.getcwd(), "src")
 
