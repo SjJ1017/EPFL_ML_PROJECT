@@ -495,9 +495,11 @@ class DocLayNetDatasetSegmented(DocLayNetDataset):
 
 if __name__ == "__main__":
     # It will take 1 hour to download the whole dataset, if you have not done it yet.
-    test_dataset = DocLayNetDatasetSegmented(split="test")
-
-
+    test_dataset = DocLayNetDataset(split="validation")
+    from tqdm import tqdm
+    for idx in tqdm(range(len(test_dataset))):
+        _ = test_dataset[idx]
+    raise NotImplementedError("Dataset loaded. Please rerun the visualization part.")
     example_idx = 34
     # To see the original labels in the dataset
     features = test_dataset[0]
@@ -510,6 +512,6 @@ if __name__ == "__main__":
     # Combine the labels from the dataset and the tokens extracted, the feature tokens will have the correct labels.
     #features = test_dataset[example_idx]
     #print(features)
-
+    [test_dataset]
     # To see the tokens with correct labels (i.e. viz_labels.pdf + token_viz_unlabeled.pdf = token_viz_labeled.pdf)
     test_dataset.visualize_tokens(example_idx, output_path="token_viz_labeled.pdf", labels=True)
