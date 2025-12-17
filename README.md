@@ -31,7 +31,7 @@ The project includes:
 
 ---
 
-## Environment Setup
+## Setup
 
 ### Prerequisites
 
@@ -62,6 +62,12 @@ tqdm
 matplotlib
 pdf-features  # Installed via git
 ```
+
+### Pretrained Models
+To run some of the experiments, you can use the pre-trained models in the `model branch`
+[Download pretrained model](https://github.com/USER/REPO/raw/models/pretrained_models/your_model.bin)
+- `best_larger_train_deep.pth` and `best_segment_model.pth` are the pre-trained Transformer Models. You can use them for prediction on real PDFs using `predict_and_visualize.py`
+- `models/token_type_example_model.model` and `paragraph_extractor_example_model_.model` are baseline LighGBM Models trained on new dataset. You can use them to reproduce the results using `lightgbm_experiments.ipynb`
 
 ---
 
