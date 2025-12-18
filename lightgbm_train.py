@@ -8,9 +8,9 @@ import os
 from tqdm import tqdm
 
 
-def train_tyken_type():
+def train_token_type():
 
-    all_files = os.listdir("../ml/pdf-labeled-data/labeled_data/token_type/test_data")[:100]
+    all_files = os.listdir("../ml/pdf-labeled-data/labeled_data/token_type/test_data")
     pdfs_features = []
     for file in tqdm(all_files):
         pdf_feature = PdfFeatures.from_labeled_data("../ml/pdf-labeled-data", "test_data", file)
@@ -77,4 +77,5 @@ def train_segmenter():
         print(f"Training time: {end_time - start_time} seconds")
     train_segmenter_model()
 
-train_segmenter()
+#train_segmenter()
+train_token_type()
